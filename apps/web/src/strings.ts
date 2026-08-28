@@ -91,6 +91,8 @@ export const UI = {
     dropSub: "o haz clic para elegir archivos",
     dropHint: "PDF de varias páginas · JPG · PNG · TIFF — se recomienda escáner a 200 DPI",
     working: "Leyendo hojas…",
+    preparing: "Preparando…",
+    progress: (done: number, total: number) => `${done} de ${total} hojas leídas`,
     duplicate: "Ya procesada",
     processed: "Leída",
     rejectedLabel: "No se pudo leer",

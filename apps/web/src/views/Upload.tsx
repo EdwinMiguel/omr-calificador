@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import { uploadSheets, type UploadResult } from "../api/client.ts";
+import { uploadSheets, type UploadResult, type UploadProgress } from "../api/client.ts";
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Callout, ViewHead, Bubble, Chip } from "../ui/primitives.tsx";
 
 export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: () => void }) {
   const [results, setResults] = useState<UploadResult[]>([]);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -14,14 +15,16 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
     if (!files || files.length === 0) return;
     setBusy(true);
     setError(null);
+    setProgress(null);
     try {
-      const res = await uploadSheets(batchId, Array.from(files));
+      const res = await uploadSheets(batchId, Array.from(files), setProgress);
       setResults((prev) => [...res.results, ...prev]);
       onUploaded();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -42,8 +45,14 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
           onDrop={(e) => { e.preventDefault(); setDragging(false); void send(e.dataTransfer.files); }}
         >
           <h3>{busy ? UI.upload.working : UI.upload.dropTitle}</h3>
-          <p>{UI.upload.dropSub}</p>
-          <div className="drop-hint">{UI.upload.dropHint}</div>
+          {busy ? (
+            <UploadProgressBar progress={progress} />
+          ) : (
+            <>
+              <p>{UI.upload.dropSub}</p>
+              <div className="drop-hint">{UI.upload.dropHint}</div>
+            </>
+          )}
           <input
             ref={inputRef}
             type="file"
@@ -87,6 +96,36 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * Mientras el total no se conoce (el servidor todavía está abriendo el
+ * primer PDF) se muestra una barra indeterminada en vez de un "0%" que
+ * mentiría sobre el avance real.
+ */
+function UploadProgressBar({ progress }: { progress: UploadProgress | null }) {
+  const total = progress?.total ?? null;
+  const processed = progress?.processed ?? 0;
+  const pct = total && total > 0 ? Math.min(100, (processed / total) * 100) : null;
+
+  return (
+    <div className="upload-progress">
+      <div className="progress">
+        <i
+          className={pct === null ? "is-indeterminate" : undefined}
+          style={pct === null ? undefined : { width: `${pct.toFixed(1)}%` }}
+        />
+      </div>
+      <div className="upload-progress-text mono">
+        {total === null
+          ? UI.upload.preparing
+          : UI.upload.progress(processed, total)}
+        {progress?.currentFile && (
+          <span className="upload-progress-file"> · {progress.currentFile}</span>
+        )}
+      </div>
+    </div>
   );
 }
 

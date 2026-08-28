@@ -575,3 +575,24 @@ select.btn { appearance: none; padding-right: 26px; background-image: none; max-
   color: var(--rail-ink-hi);
   text-decoration: underline;
 }
+
+/* ─── Progreso de subida ─────────────────────────────────── */
+.upload-progress { margin: 16px auto 0; max-width: 380px; display: flex; flex-direction: column; gap: 9px; }
+.upload-progress .progress { height: 6px; }
+.upload-progress-text { font-size: var(--t-sm); color: var(--ink-2); }
+.upload-progress-file { color: var(--ink-muted); }
+
+/* Barra indeterminada: mientras no se sabe el total, se mueve para indicar
+   actividad en vez de mostrar un 0% que sería falso. */
+.progress > i.is-indeterminate {
+  width: 35%;
+  animation: progress-slide 1.3s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  0%   { margin-left: 0%; }
+  50%  { margin-left: 65%; }
+  100% { margin-left: 0%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress > i.is-indeterminate { animation: none; width: 100%; opacity: .5; }
+}

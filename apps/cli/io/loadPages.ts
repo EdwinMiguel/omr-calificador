@@ -55,7 +55,16 @@ async function decodeRasterImage(bytes: Buffer): Promise<GrayImage> {
  * de 2 páginas por hoja física, y el llamador no debe tener que distinguir
  * "PDF de 1 página" de "imagen".
  */
-async function decodePdfPages(bytes: Buffer): Promise<GrayImage[]> {
+/**
+ * Se avisa la cantidad de páginas apenas se abre el PDF, ANTES de
+ * rasterizarlas: pdf.js conoce `numPages` de inmediato, mientras que
+ * renderizar cada página cuesta ~1s. Sin esto, quien sube un PDF de 30
+ * hojas ve medio minuto de "Preparando…" sin ninguna cifra; con esto ve
+ * "0 de 30" desde el principio y entiende cuánto falta.
+ */
+export type PageCountListener = (pageCount: number) => void;
+
+async function decodePdfPages(bytes: Buffer, onPageCount?: PageCountListener): Promise<GrayImage[]> {
   // pdf.js avisa por consola "Ensure standardFontDataUrl..." cuando un PDF
   // referencia una fuente estándar (Helvetica, como hoja-v1.pdf) sin
   // proveerle dónde reconstruir sus glyphs. Se investigó apuntarlo a
@@ -67,6 +76,7 @@ async function decodePdfPages(bytes: Buffer): Promise<GrayImage[]> {
   // con métricas ligeramente distintas no mueve un solo píxel de las zonas
   // de fiduciales o burbujas, que ya tienen su propio margen de seguridad.
   const doc = await getDocument({ data: new Uint8Array(bytes) }).promise;
+  onPageCount?.(doc.numPages);
   const scale = PDF_RASTER_DPI / 72; // el viewport de pdf.js está en puntos (1/72")
 
   const pages: GrayImage[] = [];
@@ -99,14 +109,19 @@ async function decodePdfPages(bytes: Buffer): Promise<GrayImage[]> {
  * no tiene (ni debe tener) una ruta de archivo. `fileName` se usa solo para
  * deducir el formato por su extensión, igual que en loadPages().
  */
-export async function loadPagesFromBuffer(bytes: Buffer, fileName: string): Promise<GrayImage[]> {
+export async function loadPagesFromBuffer(
+  bytes: Buffer,
+  fileName: string,
+  onPageCount?: PageCountListener
+): Promise<GrayImage[]> {
   const ext = extname(fileName).toLowerCase();
 
   if (RASTER_EXTENSIONS.has(ext)) {
+    onPageCount?.(1);
     return [await decodeRasterImage(bytes)];
   }
   if (ext === ".pdf") {
-    return decodePdfPages(bytes);
+    return decodePdfPages(bytes, onPageCount);
   }
 
   throw new Error(`Formato no soportado: '${ext}' (archivo: ${fileName})`);

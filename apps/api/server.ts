@@ -116,11 +116,63 @@ app.get("/api/batches/:id", async (req, reply) => {
   };
 });
 
+/**
+ * Progreso de subidas en curso, para que la interfaz pueda mostrar
+ * "18 de 30 procesadas" en vez de un cartel mudo durante ~36 segundos.
+ *
+ * POR QUÉ UN MAPA EN MEMORIA Y NO ALGO PERSISTIDO: el progreso solo tiene
+ * sentido mientras la petición está viva. Si el proceso se reinicia, la
+ * subida se perdió igual — no hay nada que recuperar. Guardarlo en el log
+ * de eventos ensuciaría un registro que existe para auditar notas, no
+ * para estados efímeros de la interfaz.
+ *
+ * El cliente manda su propio `uploadId` y consulta un endpoint aparte
+ * mientras la subida sigue abierta. Funciona incluso con UN archivo PDF de
+ * 30 páginas, que es el caso más probable del escáner del colegio y el
+ * único que no se puede resolver troceando del lado del cliente.
+ */
+interface UploadProgress {
+  processed: number;
+  /** null hasta que se termina de decodificar el primer archivo. */
+  total: number | null;
+  currentFile: string | null;
+  done: boolean;
+  updatedAt: number;
+}
+const uploadProgress = new Map<string, UploadProgress>();
+
+/** Sin esto el mapa crecería para siempre: cada subida deja una entrada. */
+const PROGRESS_TTL_MS = 5 * 60 * 1000;
+function pruneProgress(): void {
+  const cutoff = Date.now() - PROGRESS_TTL_MS;
+  for (const [key, value] of uploadProgress) {
+    if (value.updatedAt < cutoff) uploadProgress.delete(key);
+  }
+}
+
+app.get("/api/uploads/:uploadId/progress", async (req, reply) => {
+  const { uploadId } = z.object({ uploadId: z.string() }).parse(req.params);
+  const progress = uploadProgress.get(uploadId);
+  if (!progress) return reply.code(404).send({ error: "Subida no encontrada" });
+  return progress;
+});
+
 // ── Subida y análisis ───────────────────────────────────────────────────
 app.post("/api/batches/:id/sheets", async (req, reply) => {
   const { id } = z.object({ id: z.string() }).parse(req.params);
   const batch = await repo.getBatch(id);
   if (!batch) return reply.code(404).send({ error: "Lote no encontrado" });
+
+  const uploadId = z.object({ uploadId: z.string().max(80).optional() })
+    .parse(req.query).uploadId;
+  pruneProgress();
+  const progress: UploadProgress = {
+    processed: 0, total: null, currentFile: null, done: false, updatedAt: Date.now(),
+  };
+  if (uploadId) uploadProgress.set(uploadId, progress);
+  const tick = (patch: Partial<UploadProgress>): void => {
+    Object.assign(progress, patch, { updatedAt: Date.now() });
+  };
 
   const results: unknown[] = [];
   await mkdir(join(DATA_DIR, "uploads"), { recursive: true });
@@ -131,17 +183,26 @@ app.post("/api/batches/:id/sheets", async (req, reply) => {
     // PROMPT.md §13.10: idempotencia por hash del archivo.
     const fileHash = createHash("sha256").update(buffer).digest("hex");
     const fileName = part.filename;
+    tick({ currentFile: fileName });
 
     await writeFile(join(DATA_DIR, "uploads", `${fileHash}-${fileName}`), buffer);
 
     // §13.6: un archivo puede traer varias hojas (PDF multipágina).
-    const pages = await loadPagesFromBuffer(buffer, fileName);
+    // El total se informa apenas se abre el archivo, sin esperar a que se
+    // rasterice: para un PDF de 30 hojas eso es medio minuto de diferencia
+    // entre ver "0 de 30" y ver un signo de pregunta.
+    const pages = await loadPagesFromBuffer(buffer, fileName, (count) => {
+      tick({ total: (progress.total ?? 0) + count });
+    });
 
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
       const existing = await repo.findSheetByHash(id, fileHash, pageIndex);
       if (existing) {
         results.push({ fileName, pageIndex, status: "duplicate", sheetId: existing.id });
         req.log.info({ batchId: id, sheetId: existing.id, fileHash }, "hoja duplicada, se omite");
+        // Una duplicada también avanza el contador: si no, la barra se
+        // quedaría corta y parecería trabada al re-subir un archivo.
+        tick({ processed: progress.processed + 1 });
         continue;
       }
 
@@ -172,9 +233,11 @@ app.post("/api/batches/:id/sheets", async (req, reply) => {
         "hoja procesada"
       );
       results.push({ fileName, pageIndex, status: outcome.kind, sheetId: stored.id });
+      tick({ processed: progress.processed + 1 });
     }
   }
 
+  tick({ done: true, currentFile: null });
   return reply.code(201).send({ results });
 });
 

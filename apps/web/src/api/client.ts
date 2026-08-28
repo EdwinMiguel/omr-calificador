@@ -184,10 +184,57 @@ export interface UploadResult {
   sheetId: string;
 }
 
-export function uploadSheets(batchId: string, files: File[]): Promise<{ results: UploadResult[] }> {
+export interface UploadProgress {
+  processed: number;
+  /** null mientras no se sepa: un PDF no revela su cantidad de páginas hasta abrirlo. */
+  total: number | null;
+  currentFile: string | null;
+  done: boolean;
+}
+
+/**
+ * Sube hojas informando el avance.
+ *
+ * El progreso NO puede deducirse del lado del cliente: un solo PDF puede
+ * traer 30 hojas, y la barra tiene que moverse hoja a hoja, no archivo a
+ * archivo. Por eso el cliente inventa un `uploadId`, lo manda con la
+ * subida, y consulta un endpoint aparte mientras la petición sigue abierta.
+ */
+export async function uploadSheets(
+  batchId: string,
+  files: File[],
+  onProgress?: (p: UploadProgress) => void
+): Promise<{ results: UploadResult[] }> {
   const form = new FormData();
   for (const f of files) form.append("file", f);
-  return request(`/batches/${batchId}/sheets`, { method: "POST", body: form });
+
+  const uploadId = crypto.randomUUID();
+  const upload = request<{ results: UploadResult[] }>(
+    `/batches/${batchId}/sheets?uploadId=${uploadId}`,
+    { method: "POST", body: form }
+  );
+
+  if (onProgress) {
+    let polling = true;
+    void upload.finally(() => { polling = false; });
+    void (async () => {
+      while (polling) {
+        await new Promise((r) => setTimeout(r, 700));
+        if (!polling) break;
+        try {
+          const p = await request<UploadProgress>(`/uploads/${uploadId}/progress`);
+          onProgress(p);
+          if (p.done) break;
+        } catch {
+          // 404 al principio (la subida aún no registró su progreso) o al
+          // final (ya expiró). Ninguno es un fallo de la subida en sí, así
+          // que se ignora y se sigue consultando.
+        }
+      }
+    })();
+  }
+
+  return upload;
 }
 
 export function postCorrection(
