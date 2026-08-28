@@ -17,7 +17,10 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm install && npm run build
+    # --include=dev es necesario: `vite` construye la web y vive en
+    # devDependencies. Render define NODE_ENV=production, que por defecto
+    # haría que npm las omita y el build fallara sin explicación clara.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
