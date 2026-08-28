@@ -1,0 +1,24 @@
+# render.yaml — despliegue de un clic en Render (plan gratuito, sin tarjeta).
+#
+# Un solo servicio: Fastify sirve la API bajo /api y la web ya construida
+# (apps/web/dist) en la misma URL — nada de CORS, nada de un segundo
+# servicio de hosting que pagar o configurar por separado.
+#
+# LÍMITE CONOCIDO del plan gratuito, para no sorprenderse en una demo: el
+# disco es efímero. `OMR_DATA_DIR` (por defecto `.data/`, ver server.ts) se
+# reinicia vacío en cada deploy y el servicio se "duerme" tras 15 min sin
+# tráfico (el primer pedido después de eso tarda ~30-50s en responder).
+# Sirve perfecto para probar la interfaz; NO conserva datos entre despliegues
+# — para eso hace falta una base persistente (Postgres gestionado), que es
+# el siguiente paso natural cuando esto deje de ser una prueba.
+services:
+  - type: web
+    name: omr-calificador
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.9.0

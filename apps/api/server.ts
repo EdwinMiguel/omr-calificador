@@ -1,0 +1,331 @@
+/**
+ * server.ts — Día 12: la API. Capa de transporte, sin lógica de dominio
+ * propia (PROMPT.md §9). Todo lo que decide algo vive en packages/:
+ * el análisis en packages/engine, la proyección en packages/domain.
+ * Aquí solo hay HTTP, validación de entrada y llamadas a esos módulos.
+ */
+
+import Fastify from "fastify";
+import multipart from "@fastify/multipart";
+import cors from "@fastify/cors";
+import staticFiles from "@fastify/static";
+import { z } from "zod";
+import { createHash } from "node:crypto";
+import { writeFile, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { loadPagesFromBuffer } from "../cli/io/loadPages.ts";
+import { analyzeSheet, ENGINE_VERSION } from "../../packages/engine/analyzeSheet.ts";
+import { buildOfficialTemplate } from "../../packages/pdf-generator/officialTemplate.ts";
+import { projectSheet, computeBatchMetrics, type ProjectedSheet } from "../../packages/domain/sheetProjection.ts";
+import type { QuestionResult } from "../../packages/engine/scoring.ts";
+import { FileRepository } from "./storage/fileRepo.ts";
+import type { StoredSheet } from "./storage/types.ts";
+
+const DPI = 200;
+const DATA_DIR = process.env.OMR_DATA_DIR ?? join(process.cwd(), ".data");
+const template = buildOfficialTemplate(100);
+
+const repo = new FileRepository(join(DATA_DIR, "events.jsonl"));
+
+const app = Fastify({
+  logger: { level: process.env.LOG_LEVEL ?? "info" },
+  bodyLimit: 60 * 1024 * 1024,
+});
+
+await app.register(cors, { origin: true });
+await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 40 } });
+
+/**
+ * Reconstruye una hoja: lectura cruda + correcciones + clave vigente.
+ *
+ * Una hoja rechazada por código ilegible SÍ se proyecta, siempre que
+ * alguien haya escrito el código a mano: sus respuestas estaban leídas
+ * (ver PartialRead en analyzeSheet.ts) y la corrección le pone dueño. Sin
+ * esa corrección devuelve null — la hoja sigue sin pertenecer a nadie.
+ */
+async function project(sheet: StoredSheet): Promise<ProjectedSheet | null> {
+  const [corrections, key] = await Promise.all([
+    repo.listCorrections(sheet.id),
+    repo.getCurrentAnswerKey(sheet.batchId),
+  ]);
+
+  let automatic: { studentId: string; questions: QuestionResult[] } | null = null;
+  if (sheet.outcome.kind === "processed") {
+    automatic = { studentId: sheet.outcome.studentId, questions: sheet.outcome.questions };
+  } else if (sheet.outcome.partial) {
+    const hasIdCorrection = corrections.some((c) => c.ordinal === null);
+    if (hasIdCorrection) automatic = { studentId: "", questions: sheet.outcome.partial.questions };
+  }
+  if (!automatic) return null;
+
+  return projectSheet(
+    automatic,
+    corrections,
+    key ? key.answers : null,
+    new Set(key?.voided ?? [])
+  );
+}
+
+async function sheetSummary(sheet: StoredSheet) {
+  const projected = await project(sheet);
+  return {
+    id: sheet.id,
+    fileName: sheet.fileName,
+    pageIndex: sheet.pageIndex,
+    createdAt: sheet.createdAt,
+    outcome: sheet.outcome,
+    projected,
+  };
+}
+
+// ── Lotes ───────────────────────────────────────────────────────────────
+app.post("/api/batches", async (req, reply) => {
+  const body = z.object({ label: z.string().min(1).max(120) }).parse(req.body);
+  const batch = await repo.createBatch({
+    label: body.label,
+    templateId: template.id,
+    templateVersion: template.version,
+  });
+  return reply.code(201).send(batch);
+});
+
+app.get("/api/batches", async () => repo.listBatches());
+
+app.get("/api/batches/:id", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const batch = await repo.getBatch(id);
+  if (!batch) return reply.code(404).send({ error: "Lote no encontrado" });
+
+  const sheets = await repo.listSheets(id);
+  const key = await repo.getCurrentAnswerKey(id);
+  const summaries = await Promise.all(sheets.map(sheetSummary));
+
+  return {
+    batch,
+    answerKey: key,
+    sheets: summaries,
+    metrics: computeBatchMetrics(
+      summaries.map((s) => ({
+        outcome: { kind: s.outcome.kind, reason: s.outcome.kind === "rejected" ? s.outcome.reason : undefined },
+        projected: s.projected,
+      }))
+    ),
+  };
+});
+
+// ── Subida y análisis ───────────────────────────────────────────────────
+app.post("/api/batches/:id/sheets", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const batch = await repo.getBatch(id);
+  if (!batch) return reply.code(404).send({ error: "Lote no encontrado" });
+
+  const results: unknown[] = [];
+  await mkdir(join(DATA_DIR, "uploads"), { recursive: true });
+
+  for await (const part of req.parts()) {
+    if (part.type !== "file") continue;
+    const buffer = await part.toBuffer();
+    // PROMPT.md §13.10: idempotencia por hash del archivo.
+    const fileHash = createHash("sha256").update(buffer).digest("hex");
+    const fileName = part.filename;
+
+    await writeFile(join(DATA_DIR, "uploads", `${fileHash}-${fileName}`), buffer);
+
+    // §13.6: un archivo puede traer varias hojas (PDF multipágina).
+    const pages = await loadPagesFromBuffer(buffer, fileName);
+
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const existing = await repo.findSheetByHash(id, fileHash, pageIndex);
+      if (existing) {
+        results.push({ fileName, pageIndex, status: "duplicate", sheetId: existing.id });
+        req.log.info({ batchId: id, sheetId: existing.id, fileHash }, "hoja duplicada, se omite");
+        continue;
+      }
+
+      const outcome = await analyzeSheet(pages[pageIndex]!, template, DPI, {});
+      const stored = await repo.appendSheet({
+        batchId: id,
+        fileHash,
+        fileName,
+        pageIndex,
+        engineVersion: ENGINE_VERSION,
+        outcome:
+          outcome.kind === "processed"
+            ? {
+                kind: "processed",
+                studentId: outcome.result.studentId,
+                reprojectionErrorPx: outcome.result.reprojectionErrorPx,
+                thresholdMethod: outcome.result.thresholdMethod,
+                questions: outcome.result.questions,
+                measurements: outcome.result.measurements,
+              }
+            : { kind: "rejected", reason: outcome.reason, partial: outcome.partial },
+      });
+
+      // §13.11: los logs llevan batchId y sheetId para poder depurar una
+      // hoja entre mil.
+      req.log.info(
+        { batchId: id, sheetId: stored.id, outcome: outcome.kind, reason: outcome.kind === "rejected" ? outcome.reason : undefined },
+        "hoja procesada"
+      );
+      results.push({ fileName, pageIndex, status: outcome.kind, sheetId: stored.id });
+    }
+  }
+
+  return reply.code(201).send({ results });
+});
+
+// ── Detalle de hoja ─────────────────────────────────────────────────────
+app.get("/api/sheets/:id", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const sheet = await repo.getSheet(id);
+  if (!sheet) return reply.code(404).send({ error: "Hoja no encontrada" });
+  return {
+    sheet,
+    projected: await project(sheet),
+    corrections: await repo.listCorrections(id),
+  };
+});
+
+// ── Correcciones (append-only, §13.9) ───────────────────────────────────
+const correctionBody = z.object({
+  ordinal: z.number().int().positive().nullable(),
+  resolvedAs: z.string().min(1).max(4).nullable(),
+  resolvedStudentId: z.string().regex(/^\d{7}$/).optional(),
+  reason: z.string().max(300).default("revisión manual"),
+  createdBy: z.string().min(1).max(80).default("operador"),
+});
+
+app.post("/api/sheets/:id/corrections", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const body = correctionBody.parse(req.body);
+  const sheet = await repo.getSheet(id);
+  if (!sheet) return reply.code(404).send({ error: "Hoja no encontrada" });
+  // Una hoja rechazada admite que se le escriba el código a mano (ordinal
+  // null) siempre que sus respuestas se hayan leído; lo que no admite es
+  // corregir respuestas que nunca se llegaron a medir.
+  if (sheet.outcome.kind === "rejected") {
+    if (!sheet.outcome.partial) {
+      return reply.code(400).send({ error: "Esta hoja no se pudo leer: no hay respuestas que corregir" });
+    }
+    if (body.ordinal !== null && !sheet.outcome.partial) {
+      return reply.code(400).send({ error: "No se pueden corregir respuestas de una hoja rechazada" });
+    }
+  }
+  if (body.ordinal === null && !body.resolvedStudentId) {
+    return reply.code(400).send({ error: "Falta el código del alumno" });
+  }
+
+  const before = await project(sheet);
+  const previous =
+    body.ordinal === null
+      ? before?.studentId ?? null
+      : (() => {
+          const q = before?.questions.find((x) => x.ordinal === body.ordinal);
+          return q && q.state.kind === "ANSWERED" ? q.state.option : q?.state.kind ?? null;
+        })();
+
+  const correction = await repo.appendCorrection({
+    sheetId: id,
+    ordinal: body.ordinal,
+    resolvedAs: body.resolvedAs,
+    resolvedStudentId: body.resolvedStudentId,
+    previousValue: previous,
+    reason: body.reason,
+    createdBy: body.createdBy,
+  });
+
+  req.log.info({ batchId: sheet.batchId, sheetId: id, ordinal: body.ordinal }, "corrección registrada");
+  return reply.code(201).send({ correction, projected: await project(sheet) });
+});
+
+// ── Clave de respuestas ─────────────────────────────────────────────────
+const answerKeyBody = z.object({
+  answers: z.record(z.string(), z.string().min(1).max(4)),
+  voided: z.array(z.number().int().positive()).default([]),
+  source: z.enum(["sheet", "manual", "import"]),
+  sourceSheetId: z.string().optional(),
+  createdBy: z.string().min(1).max(80).default("operador"),
+});
+
+app.post("/api/batches/:id/answer-key", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const body = answerKeyBody.parse(req.body);
+  const batch = await repo.getBatch(id);
+  if (!batch) return reply.code(404).send({ error: "Lote no encontrado" });
+
+  const answers: Record<number, string> = {};
+  for (const [k, v] of Object.entries(body.answers)) answers[Number(k)] = v;
+
+  const key = await repo.appendAnswerKey({
+    batchId: id,
+    answers,
+    voided: body.voided,
+    source: body.source,
+    sourceSheetId: body.sourceSheetId,
+    createdBy: body.createdBy,
+  });
+  req.log.info({ batchId: id, keyVersion: key.version, source: key.source }, "clave registrada");
+  return reply.code(201).send(key);
+});
+
+app.get("/api/batches/:id/answer-keys", async (req) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  return repo.listAnswerKeys(id);
+});
+
+/**
+ * Lee una hoja patrón ya subida y devuelve sus respuestas como candidata a
+ * clave — SIN activarla. Las preguntas que no se leyeron limpias vienen
+ * marcadas para que una persona las confirme: una clave a medias calificaría
+ * mal a todo el lote sin que nada parezca roto (mismo principio que §13.8).
+ */
+app.get("/api/sheets/:id/as-answer-key", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const sheet = await repo.getSheet(id);
+  if (!sheet) return reply.code(404).send({ error: "Hoja no encontrada" });
+  if (sheet.outcome.kind !== "processed") {
+    return reply.code(400).send({ error: "La hoja patrón no se pudo leer", reason: sheet.outcome.reason });
+  }
+
+  const answers: Record<number, string> = {};
+  const unresolved: number[] = [];
+  for (const q of sheet.outcome.questions) {
+    if (q.state.kind === "ANSWERED") answers[q.ordinal] = q.state.option;
+    else unresolved.push(q.ordinal);
+  }
+  return { sheetId: id, answers, unresolved, total: sheet.outcome.questions.length };
+});
+
+/**
+ * Sirve la web ya construida (apps/web/dist) desde el mismo proceso.
+ *
+ * PROD_ONLY, deliberado: en desarrollo la web corre con `vite` (HMR) y su
+ * propio proxy a /api — no tiene sentido servirla aquí también. Esto solo
+ * se activa cuando existe un build, es decir, en el despliegue real.
+ *
+ * Un solo servicio en vez de dos (API + estático separado) es la elección
+ * más simple para desplegar con costo 0: nada de CORS entre orígenes,
+ * nada de una segunda cuenta/panel de hosting, una sola URL.
+ */
+const webDist = join(dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
+if (existsSync(webDist)) {
+  await app.register(staticFiles, { root: webDist });
+  // SPA: cualquier ruta que no sea /api/* ni un archivo estático real cae
+  // en index.html — esta app no navega por URL todavía, pero un refresh o
+  // un enlace copiado no debe romperse con un 404 en blanco.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.raw.url?.startsWith("/api/")) {
+      return reply.code(404).send({ error: "No encontrado" });
+    }
+    return reply.sendFile("index.html");
+  });
+  app.log.info(`sirviendo web estática desde ${webDist}`);
+}
+
+const port = Number(process.env.PORT ?? 3001);
+await app.listen({ port, host: "0.0.0.0" });
+app.log.info(`API lista en http://localhost:${port} · datos en ${DATA_DIR}`);
