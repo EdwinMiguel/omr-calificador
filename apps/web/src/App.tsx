@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { useBatches, useBatch, createBatch } from "./api/client.ts";
-import { UI } from "./strings.ts";
+import { UI, SUPPORT } from "./strings.ts";
 import { Upload } from "./views/Upload.tsx";
 import { Results } from "./views/Results.tsx";
 import { Review } from "./views/Review.tsx";
@@ -94,6 +94,22 @@ export function App() {
           100 preguntas × A–E
           <br />
           código: 7 dígitos
+        </div>
+
+        <div className="rail-contact">
+          <div className="rail-contact-label">{SUPPORT.label}</div>
+          <div className="rail-contact-name">{SUPPORT.name}</div>
+          <a className="rail-contact-link" href={`mailto:${SUPPORT.email}`}>
+            {SUPPORT.email}
+          </a>
+          <a
+            className="rail-contact-link"
+            href={`https://wa.me/${SUPPORT.whatsapp}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {SUPPORT.phoneDisplay}
+          </a>
         </div>
       </aside>
 

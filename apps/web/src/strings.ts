@@ -47,6 +47,20 @@ export const REJECTION: Record<string, { title: string; what: string; action: st
   },
 };
 
+/**
+ * Contacto de soporte, visible en el pie del panel lateral en toda la app
+ * — quien esté probando el sistema tiene que poder encontrar a quién
+ * escribirle sin buscar. `whatsapp` va en formato wa.me (solo dígitos, con
+ * código de país, sin +) para que el enlace abra directo.
+ */
+export const SUPPORT = {
+  label: "Soporte",
+  name: "Miguel Orellana Sotomayor",
+  email: "miguelorellanasotomayor@gmail.com",
+  phoneDisplay: "+51 933 789 071",
+  whatsapp: "51933789071",
+} as const;
+
 /** Por qué una pregunta llegó a revisión, en términos de lo que se ve. */
 export const REVIEW_REASON: Record<string, string> = {
   AMBIGUOUS: "Marca débil",

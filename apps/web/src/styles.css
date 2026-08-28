@@ -538,3 +538,40 @@ td.num, th.num { text-align: right; }
 select.btn { appearance: none; padding-right: 26px; background-image: none; max-width: 220px; }
 .method:disabled { opacity: .5; cursor: wait; }
 .keystate-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ─── Contacto de soporte, pie del riel ──────────────────── */
+.rail-contact {
+  padding: 13px 18px 18px;
+  border-top: 1px solid var(--rail-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rail-contact-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--rail-ink);
+  opacity: .5;
+  margin-bottom: 2px;
+}
+.rail-contact-name {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--rail-ink-hi);
+}
+.rail-contact-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--rail-ink);
+  text-decoration: none;
+  opacity: .8;
+  transition: opacity .13s ease, color .13s ease;
+}
+.rail-contact-link:hover,
+.rail-contact-link:focus-visible {
+  opacity: 1;
+  color: var(--rail-ink-hi);
+  text-decoration: underline;
+}
