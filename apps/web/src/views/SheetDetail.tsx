@@ -1,6 +1,7 @@
 import { useSheet, type Correction } from "../api/client.ts";
 import { UI } from "../strings.ts";
 import { Card, CardHead, Stat, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
+import { SheetImage } from "../ui/SheetImage.tsx";
 
 export function SheetDetail({ sheetId }: { sheetId: string }) {
   const { data, loading, error } = useSheet(sheetId);
@@ -26,6 +27,16 @@ export function SheetDetail({ sheetId }: { sheetId: string }) {
             note={UI.common.of20}
           />
         </div>
+
+        <Card>
+          <CardHead>
+            <span className="eyebrow">{UI.detail.aligned}</span>
+            <span className="topbar-meta">{UI.detail.verifyHint}</span>
+          </CardHead>
+          <div className="card-body">
+            <SheetImage sheetId={sheetId} />
+          </div>
+        </Card>
 
         <Card>
           <CardHead><span className="eyebrow">{UI.detail.history}</span></CardHead>

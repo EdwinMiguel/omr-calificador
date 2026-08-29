@@ -11,13 +11,17 @@ import cors from "@fastify/cors";
 import staticFiles from "@fastify/static";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadPagesFromBuffer } from "../cli/io/loadPages.ts";
 import { analyzeSheet, ENGINE_VERSION } from "../../packages/engine/analyzeSheet.ts";
+import { analyzeGeometry } from "../../packages/engine/geometry.ts";
+import { renderReadingOverlay, type ReadingMark } from "../../packages/engine/readingOverlay.ts";
+import type { GrayImage } from "../../packages/engine/types.ts";
+import sharp from "sharp";
 import { buildOfficialTemplate } from "../../packages/pdf-generator/officialTemplate.ts";
 import { projectSheet, computeBatchMetrics, type ProjectedSheet } from "../../packages/domain/sheetProjection.ts";
 import type { QuestionResult } from "../../packages/engine/scoring.ts";
@@ -251,6 +255,93 @@ app.get("/api/sheets/:id", async (req, reply) => {
     projected: await project(sheet),
     corrections: await repo.listCorrections(id),
   };
+});
+
+/**
+ * La hoja escaneada, enderezada, con lo que el motor leyó dibujado encima
+ * — PROMPT.md §8 ("salida visual siempre"). Es lo que permite al profesor
+ * verificar de un vistazo que la lectura coincide con el papel, en vez de
+ * confiar en una tabla de letras.
+ *
+ * CACHÉ EN DISCO, y no por optimización prematura: rehacer la geometría
+ * (fiduciales + homografía + warp) cuesta ~1.2 s MEDIDOS. Sin caché, mirar
+ * 30 hojas de un aula serían 36 segundos de espera pura. Se guarda la
+ * imagen ALINEADA (lo caro) y el overlay se dibuja fresco en cada pedido
+ * (lo barato), porque el overlay cambia cada vez que alguien corrige una
+ * respuesta y una imagen cacheada con el overlay quedaría desactualizada.
+ */
+const ALIGNED_DIR = join(DATA_DIR, "aligned");
+
+async function alignedImageOf(sheet: StoredSheet): Promise<GrayImage | null> {
+  await mkdir(ALIGNED_DIR, { recursive: true });
+  const cachePath = join(ALIGNED_DIR, `${sheet.id}.png`);
+
+  if (existsSync(cachePath)) {
+    const { data, info } = await sharp(cachePath)
+      .grayscale().raw().toBuffer({ resolveWithObject: true });
+    return { data: new Uint8Array(data), width: info.width, height: info.height };
+  }
+
+  const uploadPath = join(DATA_DIR, "uploads", `${sheet.fileHash}-${sheet.fileName}`);
+  if (!existsSync(uploadPath)) return null;
+
+  const pages = await loadPagesFromBuffer(await readFile(uploadPath), sheet.fileName);
+  const page = pages[sheet.pageIndex];
+  if (!page) return null;
+
+  const geo = await analyzeGeometry(page, template, DPI);
+  if (geo.kind === "rejected") return null;
+
+  await sharp(Buffer.from(geo.normalized.data), {
+    raw: { width: geo.normalized.width, height: geo.normalized.height, channels: 1 },
+  }).png().toFile(cachePath);
+
+  return geo.normalized;
+}
+
+app.get("/api/sheets/:id/image", async (req, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(req.params);
+  const query = z.object({
+    overlay: z.enum(["0", "1"]).default("1"),
+    width: z.coerce.number().int().min(200).max(4000).optional(),
+  }).parse(req.query);
+
+  const sheet = await repo.getSheet(id);
+  if (!sheet) return reply.code(404).send({ error: "Hoja no encontrada" });
+
+  const aligned = await alignedImageOf(sheet);
+  if (!aligned) {
+    return reply.code(422).send({ error: "Esta hoja no se pudo enderezar para mostrarla" });
+  }
+
+  let pipeline;
+  if (query.overlay === "1") {
+    const projected = await project(sheet);
+    const marks: ReadingMark[] = (projected?.questions ?? []).map((q) => ({
+      groupId: `q.${q.ordinal}`,
+      options: q.state.kind === "ANSWERED" ? [q.state.option]
+        : q.state.kind === "MULTIPLE" ? q.state.options
+        : [],
+      // Una corrección manual ya no está "en duda": se muestra como leída,
+      // que es lo que el profesor quiere confirmar al mirar la hoja.
+      tone: q.state.kind === "ANSWERED" ? "read" : "review",
+    }));
+    const rgb = renderReadingOverlay(aligned, template, DPI, marks);
+    pipeline = sharp(Buffer.from(rgb), {
+      raw: { width: aligned.width, height: aligned.height, channels: 3 },
+    });
+  } else {
+    pipeline = sharp(Buffer.from(aligned.data), {
+      raw: { width: aligned.width, height: aligned.height, channels: 1 },
+    });
+  }
+
+  if (query.width) pipeline = pipeline.resize({ width: query.width });
+  const png = await pipeline.png({ compressionLevel: 6 }).toBuffer();
+
+  // Sin caché HTTP: el overlay cambia con cada corrección y una imagen
+  // vieja mostraría al profesor una lectura que ya no es la vigente.
+  return reply.header("content-type", "image/png").header("cache-control", "no-store").send(png);
 });
 
 // ── Correcciones (append-only, §13.9) ───────────────────────────────────

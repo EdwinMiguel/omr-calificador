@@ -197,7 +197,17 @@ export const UI = {
   detail: {
     title: (id: string) => `Hoja ${id}`,
     lead: "Todo lo que el sistema leyó en esta hoja, y cada cambio que se le hizo después. Nada se sobrescribe: una corrección es un registro nuevo que apunta al anterior.",
-    aligned: "Hoja alineada",
+    aligned: "Hoja escaneada",
+    showMarks: "Mostrar lo que leyó el programa",
+    legendRead: "leída con confianza",
+    legendReview: "quedó en duda",
+    zoomIn: "Ver en tamaño real",
+    zoomFit: "Ajustar a la pantalla",
+    imageAlt: "Hoja escaneada del alumno con la lectura del programa señalada",
+    imageUnavailable: "No se puede mostrar esta hoja: no se pudo enderezar para verla.",
+    verifyHint:
+      "Comprueba que cada anillo verde caiga sobre una burbuja realmente pintada. " +
+      "Las marcas ámbar son las que el programa prefirió no decidir solo.",
     history: "Historial de la hoja",
     allAnswers: "Las 100 respuestas leídas",
     automatic: "Lectura automática",
