@@ -56,6 +56,7 @@ export function Results({
                     <th>{UI.results.columns.state}</th>
                     <th className="num">{UI.results.columns.correct}</th>
                     <th className="num">{UI.results.columns.incorrect}</th>
+                    <th className="num">{UI.results.columns.blank}</th>
                     <th className="num">{UI.results.columns.review}</th>
                     <th className="num">{UI.results.columns.grade}</th>
                     <th>{UI.results.columns.origin}</th>
@@ -88,6 +89,9 @@ function Row({
       <tr>
         <td className="mono">—</td>
         <td><Chip tone={info?.actionable === false ? "idle" : "bad"}>{info?.title ?? reason}</Chip></td>
+        {/* Una celda por cada columna numérica: correctas, incorrectas,
+            en blanco, a revisión y nota. */}
+        <td className="num mono">—</td>
         <td className="num mono">—</td>
         <td className="num mono">—</td>
         <td className="num mono">—</td>
@@ -116,6 +120,7 @@ function Row({
       </td>
       <td className="num mono">{p.score.correct}</td>
       <td className="num mono">{p.score.incorrect}</td>
+      <td className="num mono">{p.blankOrdinals.length}</td>
       <td className="num mono">{pending}</td>
       <td className="num mono">{p.grade && pending === 0 ? p.grade.value : "—"}</td>
       <td className="mono topbar-meta">{sheet.fileName}</td>

@@ -468,11 +468,23 @@ app.get("/api/sheets/:id/as-answer-key", async (req, reply) => {
 const webDist = join(dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
 if (existsSync(webDist)) {
   await app.register(staticFiles, { root: webDist });
-  // SPA: cualquier ruta que no sea /api/* ni un archivo estático real cae
-  // en index.html — esta app no navega por URL todavía, pero un refresh o
-  // un enlace copiado no debe romperse con un 404 en blanco.
+  // SPA: una ruta GET que no sea /api/* ni un archivo estático real cae en
+  // index.html — esta app no navega por URL todavía, pero un refresh o un
+  // enlace copiado no debe romperse con un 404 en blanco.
+  //
+  // Solo para GET y HEAD, a propósito: un POST/PUT a una ruta que no existe
+  // tiene que dar 404 real, nunca la página HTML con status 200. Ya pasó —
+  // un desajuste entre el proxy de desarrollo y el prefijo /api hizo que un
+  // POST /batches fallido devolviera el HTML de la SPA con 200, y el
+  // cliente, al no poder interpretar ese cuerpo como JSON, fallaba en
+  // silencio sin ningún indicio de qué había salido mal.
+  //
+  // HEAD va junto a GET porque es el mismo pedido sin cuerpo: quien
+  // comprueba si una URL existe (un monitor, una vista previa de enlace)
+  // debe recibir la misma respuesta que quien la abre.
+  const SPA_METHODS = new Set(["GET", "HEAD"]);
   app.setNotFoundHandler((req, reply) => {
-    if (req.raw.url?.startsWith("/api/")) {
+    if (!SPA_METHODS.has(req.method) || req.raw.url?.startsWith("/api/")) {
       return reply.code(404).send({ error: "No encontrado" });
     }
     return reply.sendFile("index.html");

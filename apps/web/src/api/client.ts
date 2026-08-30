@@ -33,7 +33,10 @@ export interface ProjectedSheet {
   questions: ProjectedQuestion[];
   score: { correct: number; incorrect: number; ungraded: number; total: number };
   grade: Grade | null;
+  /** Preguntas que todavía esperan que una persona decida algo. */
   pendingOrdinals: number[];
+  /** Preguntas que una persona ya confirmó como no respondidas. */
+  blankOrdinals: number[];
 }
 
 /** Oscuridad normalizada por opción: ordinal → { "A": 0.02, "E": 0.241, … } */

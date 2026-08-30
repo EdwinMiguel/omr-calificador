@@ -43,7 +43,17 @@ export interface Grade {
   value: number;
   /** Preguntas que efectivamente contaron (total menos las anuladas). */
   effectiveQuestions: number;
-  /** Preguntas que aún no se pueden calificar solas (van a revisión). */
+  /**
+   * Preguntas que TODAVÍA esperan que una persona decida algo.
+   *
+   * "Pendiente" es "nadie la resolvió" — no es lo mismo que "el estado no
+   * es ANSWERED". Mismo bug que se encontró y corrigió en
+   * `sheetProjection.ts::pendingOrdinals` (una pregunta genuinamente en
+   * blanco, confirmada como tal por una persona, no debe seguir apareciendo
+   * como pendiente para siempre), corregido acá también: no bastaba con
+   * arreglarlo en un solo lugar porque son dos cálculos independientes que
+   * miran los mismos datos.
+   */
   pendingReview: number;
   rule: GradingRule;
 }
@@ -55,14 +65,19 @@ export interface Grade {
  * guardarse congelado: anular una pregunta cambia la nota de todo el aula.
  */
 export function computeGrade(
-  results: QuestionResult[],
+  results: (QuestionResult & { corrected?: boolean })[],
   voidedOrdinals: ReadonlySet<number> = new Set(),
   rule: GradingRule = DEFAULT_GRADING_RULE
 ): Grade {
   const counted = results.filter((r) => !voidedOrdinals.has(r.ordinal));
   const correct = counted.filter((r) => r.correct === true).length;
   const incorrect = counted.filter((r) => r.correct === false).length;
-  const pendingReview = counted.filter((r) => r.correct === null).length;
+  // `corrected` es opcional a propósito: scoring.ts produce QuestionResult
+  // planos que nunca lo traen (todo ahí es "recién leído por el motor", así
+  // que `!r.corrected` da `true` igual, que es el valor correcto para ese
+  // caso). Solo sheetProjection.ts, que sabe qué corrigió una persona,
+  // pasa el campo con un valor real.
+  const pendingReview = counted.filter((r) => r.correct === null && !r.corrected).length;
 
   const effectiveQuestions = counted.length;
   if (effectiveQuestions === 0) {

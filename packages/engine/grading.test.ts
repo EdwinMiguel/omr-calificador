@@ -34,6 +34,22 @@ describe("computeGrade", () => {
     }
   );
 
+  it(
+    "una pregunta corregida a mano (aunque el resultado sea BLANK) sale de " +
+    "pendingReview — 'nadie la resolvió' no es lo mismo que 'no es ANSWERED'. " +
+    "Mismo bug que pendingOrdinals en sheetProjection.ts, corregido acá también",
+    () => {
+      const results = [q(1, true), { ...q(2, null), corrected: true }, q(3, null)];
+      const g = computeGrade(results);
+      expect(g.pendingReview).toBe(1); // solo la 3, que nadie tocó
+    }
+  );
+
+  it("sin el campo `corrected` (QuestionResult plano, sin pasar por sheetProjection) se comporta igual que antes", () => {
+    const results = [q(1, true), q(2, null)];
+    expect(computeGrade(results).pendingReview).toBe(1);
+  });
+
   it("con penalización configurada, resta por error pero nunca baja de 0", () => {
     const severa = { ...DEFAULT_GRADING_RULE, id: "con-penalidad", penaltyPerIncorrect: 1 };
     const results = Array.from({ length: 10 }, (_, i) => q(i + 1, i < 2));

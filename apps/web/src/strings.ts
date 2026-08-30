@@ -114,6 +114,7 @@ export const UI = {
       state: "Estado",
       correct: "Correctas",
       incorrect: "Incorrectas",
+      blank: "En blanco",
       review: "A revisión",
       grade: "Nota",
       origin: "Origen",

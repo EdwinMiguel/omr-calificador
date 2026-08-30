@@ -56,6 +56,47 @@ describe("projectSheet", () => {
     expect(p.studentIdCorrected).toBe(true);
   });
 
+  it(
+    "una pregunta corregida a mano como BLANK sale de pendientes — 'resuelta' no es " +
+    "lo mismo que 'ANSWERED': una hoja con una pregunta genuinamente vacía, ya " +
+    "confirmada como tal, tiene que poder llegar a cero pendientes",
+    () => {
+      const corrections: CorrectionInput[] = [
+        { ordinal: 73, resolvedAs: null, createdAt: "2026-08-27T10:00:00Z" },
+      ];
+      const p = projectSheet(
+        { studentId: "7", questions: [answered(1, "B"), ambiguous(73)] },
+        corrections, { 1: "B", 73: "A" }
+      );
+      expect(p.questions.find((q) => q.ordinal === 73)!.state).toEqual({ kind: "BLANK" });
+      expect(p.pendingOrdinals).toEqual([]);
+    }
+  );
+
+  it(
+    "las cuatro categorías que ve el profesor SIEMPRE suman el total — correctas + " +
+    "incorrectas + en blanco + a revisión. Sin `blankOrdinals` una pregunta " +
+    "confirmada como vacía no caía en ninguna y la tabla mostraba 99 de 100",
+    () => {
+      const corrections: CorrectionInput[] = [
+        { ordinal: 2, resolvedAs: null, createdAt: "2026-08-27T10:00:00Z" },
+      ];
+      const p = projectSheet(
+        {
+          studentId: "7",
+          questions: [answered(1, "B"), ambiguous(2), answered(3, "X"), ambiguous(4)],
+        },
+        corrections,
+        { 1: "B", 2: "A", 3: "C", 4: "D" }
+      );
+      expect(p.blankOrdinals).toEqual([2]);
+      expect(p.pendingOrdinals).toEqual([4]);
+      const suma =
+        p.score.correct + p.score.incorrect + p.blankOrdinals.length + p.pendingOrdinals.length;
+      expect(suma).toBe(p.score.total);
+    }
+  );
+
   it("una pregunta anulada sale del puntaje y de los pendientes", () => {
     const p = projectSheet(
       { studentId: "7", questions: [answered(1, "B"), ambiguous(2)] },

@@ -396,7 +396,32 @@ td.num, th.num { text-align: right; }
 }
 
 /* ─── Clave ─────────────────────────────────────────────── */
-.keygrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 3px; }
+/* 4 columnas verticales de 25, igual que la hoja física impresa (ver
+   comentario de keygridStyle() en AnswerKeyView.tsx). --kg-rows lo fija
+   cada vista según cuántas preguntas tiene en total.
+
+   El mínimo de columna es 176px, no un número redondo: es el ancho MEDIDO
+   de la celda más ancha que existe — la del paso de verificación, con sus
+   cinco botones A-E (9+26+8+13+8+103+9). Por debajo de eso esa celda se
+   desborda de su columna. */
+.keygrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(176px, 1fr));
+  grid-template-rows: repeat(var(--kg-rows, 25), auto);
+  grid-auto-flow: column;
+  gap: 3px;
+}
+/* 4 columnas de 176px + separaciones necesitan ~713px de contenedor, o sea
+   ~780px de ventana. Por debajo se abandona el calco de la hoja física y se
+   deja que las columnas se acomoden solas: que entre en pantalla importa
+   más que espejar el papel. */
+@media (max-width: 800px) {
+  .keygrid {
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    grid-template-rows: none;
+    grid-auto-flow: row;
+  }
+}
 .keycell { display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 4px; border: 1px solid transparent; }
 .keycell:hover { background: var(--surface-2); border-color: var(--rule); }
 .keycell.is-void { opacity: .55; }

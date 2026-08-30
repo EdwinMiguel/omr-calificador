@@ -40,8 +40,32 @@ export interface ProjectedSheet {
   questions: ProjectedQuestion[];
   score: Score;
   grade: Grade | null;
-  /** Preguntas que siguen esperando decisión humana. */
+  /**
+   * Preguntas que siguen esperando decisión humana.
+   *
+   * "Pendiente" es "nadie la resolvió todavía", NO "el estado no es
+   * ANSWERED" — son cosas distintas. BUG REAL encontrado probando el flujo
+   * completo: una pregunta genuinamente en blanco, corregida a mano como
+   * "dejar en blanco", queda en estado BLANK — y BLANK nunca es ANSWERED,
+   * así que con el criterio viejo esa pregunta quedaba pendiente PARA
+   * SIEMPRE, aunque una persona ya la hubiera decidido. Una hoja con una
+   * sola pregunta genuinamente vacía nunca podía llegar a "0 pendientes" y
+   * el visor de imagen (que exige eso) se volvía inalcanzable sin motivo.
+   */
   pendingOrdinals: number[];
+  /**
+   * Preguntas que una persona confirmó como NO respondidas.
+   *
+   * Existe para que las cuentas cierren en pantalla. Una vez que
+   * `pendingOrdinals` dejó de incluirlas (ver arriba), estas preguntas no
+   * son correctas, ni incorrectas, ni pendientes — y sin una categoría
+   * propia desaparecían de la tabla: el profesor veía "23 + 76 + 0" sobre
+   * un examen de 100 y no tenía forma de saber dónde quedó la que falta.
+   *
+   * Para la NOTA no cambia nada: siguen valiendo 0 puntos y siguen en el
+   * denominador, igual que antes. Es solo hacer visible lo que ya pasaba.
+   */
+  blankOrdinals: number[];
 }
 
 /**
@@ -94,7 +118,15 @@ export function projectSheet(
     questions,
     score: computeScore(counted),
     grade: key ? computeGrade(questions, voided, rule) : null,
-    pendingOrdinals: counted.filter((q) => q.state.kind !== "ANSWERED").map((q) => q.ordinal),
+    pendingOrdinals: counted
+      .filter((q) => q.state.kind !== "ANSWERED" && !q.corrected)
+      .map((q) => q.ordinal),
+    // Una corrección solo puede terminar en ANSWERED o BLANK (ver el mapeo
+    // de `resolvedAs` más arriba), así que "corregida y no ANSWERED" es
+    // exactamente "confirmada como en blanco".
+    blankOrdinals: counted
+      .filter((q) => q.state.kind !== "ANSWERED" && q.corrected)
+      .map((q) => q.ordinal),
   };
 }
 

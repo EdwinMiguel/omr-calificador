@@ -18,6 +18,19 @@ import { Card, CardHead, ViewHead, Callout, Bubble } from "../ui/primitives.tsx"
 type Step = "empty" | "verify" | "active";
 const OPTIONS = ["A", "B", "C", "D", "E"];
 
+/**
+ * La hoja real tiene las 100 preguntas en 4 columnas verticales de 25
+ * (1-25, 26-50, 51-75, 76-100) — así la imprime `officialTemplate.ts`. La
+ * grilla de la clave tiene que verse igual, o buscar "la pregunta 63" en
+ * pantalla no coincide con dónde está en el papel que el profesor tiene
+ * al lado. El array de datos se queda ordenado 1→100 (DOM y accesibilidad
+ * no cambian); es solo la variable CSS la que le dice a `grid-auto-flow:
+ * column` cuántas filas tiene cada columna antes de saltar a la próxima.
+ */
+function keygridStyle(total: number): React.CSSProperties {
+  return { "--kg-rows": Math.ceil(total / 4) } as React.CSSProperties;
+}
+
 export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onChanged: () => void }) {
   const existing = detail.answerKey;
   const [step, setStep] = useState<Step>(existing ? "active" : "empty");
@@ -272,7 +285,7 @@ function VerifyStep({
           </div>
 
           <div className="eyebrow" style={{ margin: "20px 0 10px" }}>Las {total} respuestas</div>
-          <div className="keygrid">
+          <div className="keygrid" style={keygridStyle(total)}>
             {numbers.map((n) => {
               const ans = draft[n];
               return (
@@ -347,7 +360,7 @@ function ActiveStep({
           <button className="btn btn--sm" onClick={onReplace}>{UI.answerKey.replace}</button>
         </CardHead>
         <div className="card-body">
-          <div className="keygrid">
+          <div className="keygrid" style={keygridStyle(numbers.length)}>
             {numbers.map((n) => {
               const isVoid = voidedSet.has(n);
               return (

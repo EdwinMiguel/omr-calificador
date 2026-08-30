@@ -20,6 +20,7 @@ export function SheetDetail({ sheetId }: { sheetId: string }) {
         <div className="statgrid">
           <Stat tone="ok" label={UI.results.columns.correct} value={p.score.correct} />
           <Stat tone="bad" label={UI.results.columns.incorrect} value={p.score.incorrect} />
+          <Stat label={UI.results.columns.blank} value={p.blankOrdinals.length} />
           <Stat tone="review" label={UI.results.columns.review} value={pending} />
           <Stat
             label={UI.results.columns.grade}
