@@ -228,4 +228,37 @@ export class IndexedDbRepository implements Repository {
     const found = await tx<Blob | undefined>(db, STORES.images, "readonly", (s) => s.get(sheetId));
     return found ?? null;
   }
+
+  // ── Restauración desde respaldo (backupRestore.ts) ───────────────────
+  //
+  // FUERA de Repository a propósito: cada appendX() de la interfaz normal
+  // genera su propio `id` y estampa `createdAt` con la hora actual — correcto
+  // para uso normal (algo pasa AHORA), pero exactamente lo que NO se quiere
+  // al restaurar un respaldo, donde hay que conservar el `id` y la fecha
+  // ORIGINAL de cada evento o el historial de auditoría quedaría mintiendo
+  // (una corrección hecha hace dos semanas aparecería como hecha ahora
+  // mismo). Estos métodos hacen un `put` directo con el objeto completo tal
+  // cual venía guardado — sin la interfaz compartida de por medio, porque
+  // "restaurar preservando historia" no es un concepto que el servidor
+  // necesite (su disco no se borra solo).
+
+  async restoreBatch(batch: Batch): Promise<void> {
+    const db = await this.db();
+    await tx(db, STORES.batches, "readwrite", (s) => s.put(batch));
+  }
+
+  async restoreSheet(sheet: StoredSheet): Promise<void> {
+    const db = await this.db();
+    await tx(db, STORES.sheets, "readwrite", (s) => s.put(sheet));
+  }
+
+  async restoreAnswerKey(key: StoredAnswerKey): Promise<void> {
+    const db = await this.db();
+    await tx(db, STORES.answerKeys, "readwrite", (s) => s.put(key));
+  }
+
+  async restoreCorrection(correction: StoredCorrection): Promise<void> {
+    const db = await this.db();
+    await tx(db, STORES.corrections, "readwrite", (s) => s.put(correction));
+  }
 }

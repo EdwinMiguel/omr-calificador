@@ -109,6 +109,8 @@ export const UI = {
     average: "Promedio del aula",
     empty: "Todavía no hay hojas en este lote.",
     noKey: "Falta la clave de respuestas: las hojas están leídas pero aún no calificadas.",
+    exportCsv: "Exportar notas (CSV)",
+    downloadBackup: "Descargar respaldo",
     columns: {
       code: "Código",
       state: "Estado",
@@ -252,6 +254,7 @@ export const UI = {
     review: "Revisar",
     resolve: "Resolver",
     newBatch: "Nuevo lote",
+    restoreBackup: "Restaurar respaldo",
     batchName: "Nombre del lote",
     createBatch: "Crear lote",
     noBatch: "Crea un lote para empezar a cargar hojas.",

@@ -32,7 +32,11 @@ const template = buildOfficialTemplate(100);
 // Un solo repositorio para toda la pestaña — abrir IndexedDB tiene su propio
 // costo (primera apertura crea los almacenes) y no hay motivo para repetirlo
 // por cada hook.
-const repo = new IndexedDbRepository();
+// Exportado (no solo interno) porque backup/restauración necesitan el
+// MISMO repositorio — dos instancias de IndexedDbRepository apuntan a la
+// misma base física, pero abrir la conexión dos veces sería trabajo de más
+// sin ningún beneficio.
+export const repo = new IndexedDbRepository();
 
 export interface Batch {
   id: string;
