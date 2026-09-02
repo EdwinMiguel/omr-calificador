@@ -266,17 +266,31 @@ export interface UploadProgress {
   done: boolean;
 }
 
+export interface UploadFailure {
+  fileName: string;
+  message: string;
+}
+
 /**
  * Sube hojas informando el avance. A diferencia de la versión HTTP (que
  * necesitaba un `uploadId` y sondear un endpoint aparte porque la subida
  * viajaba por red), acá el avance llega DIRECTO por callback — no hay
  * proceso remoto del que enterarse por otro camino.
+ *
+ * UN ARCHIVO ILEGIBLE NO TUMBA LA TANDA. Los archivos son independientes
+ * entre sí, así que el que falla se aparta y los demás siguen. MEDIDO antes
+ * de este aislamiento: al soltar una hoja válida junto a un TIFF (formato
+ * que el navegador no sabe decodificar), la excepción del TIFF cortaba el
+ * bucle y la pantalla mostraba "0 hojas" — la hoja buena SÍ se había
+ * guardado, pero el profesor no tenía forma de saberlo sin recargar. Un
+ * escáner que entrega TIFF por defecto convierte eso en el caso normal, no
+ * en un caso raro.
  */
 export async function uploadSheets(
   batchId: string,
   files: File[],
   onProgress?: (p: UploadProgress) => void
-): Promise<{ results: UploadResult[] }> {
+): Promise<{ results: UploadResult[]; failures: UploadFailure[] }> {
   const progress: UploadProgress = { processed: 0, total: null, currentFile: null, done: false };
   const tick = (patch: Partial<UploadProgress>): void => {
     Object.assign(progress, patch);
@@ -284,17 +298,22 @@ export async function uploadSheets(
   };
 
   const results: UploadResult[] = [];
+  const failures: UploadFailure[] = [];
   for (const file of files) {
     tick({ currentFile: file.name });
-    const fileResults = await uploadFileLocal(repo, batchId, file, {}, {
-      onPageCount: (count) => tick({ total: (progress.total ?? 0) + count }),
-      onPageDone: () => tick({ processed: progress.processed + 1 }),
-    });
-    results.push(...fileResults);
+    try {
+      const fileResults = await uploadFileLocal(repo, batchId, file, {}, {
+        onPageCount: (count) => tick({ total: (progress.total ?? 0) + count }),
+        onPageDone: () => tick({ processed: progress.processed + 1 }),
+      });
+      results.push(...fileResults);
+    } catch (e) {
+      failures.push({ fileName: file.name, message: e instanceof Error ? e.message : String(e) });
+    }
   }
   tick({ done: true, currentFile: null });
 
-  return { results };
+  return { results, failures };
 }
 
 /** Mismas reglas exactas que el bloque de validación de POST /sheets/:id/corrections en server.ts. */

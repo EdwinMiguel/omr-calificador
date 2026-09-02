@@ -10,13 +10,26 @@
  * recibe el avance hoja por hoja.
  *
  * El worker hace TODO el trabajo pesado: decodificar el archivo, alinear la
- * hoja y clasificar las burbujas. A la página solo le vuelven resultados
- * (números y estados), nunca imágenes — así el paso de mensajes es barato.
+ * hoja y clasificar las burbujas.
  *
- * Nota sobre memoria: `loadPagesBrowser` es un generador, así que la hoja
- * N+1 no se decodifica hasta que la N terminó de analizarse y se soltó. Esa
- * es la propiedad que evita repetir dentro del navegador el desborde que
- * tiró abajo al servidor.
+ * QUÉ VUELVE A LA PÁGINA, MEDIDO: además de los números y estados, vuelve
+ * `alignedImage` (la hoja enderezada, 1654×2339 = 3.7 MB por página), que es
+ * lo que la página guarda como PNG para "Ver hoja". No hay alternativa
+ * barata: en el navegador no existe el disco del servidor donde recalcularla
+ * después (ver analyzeSheet.ts, comentario de alignedImage).
+ *
+ * CONSECUENCIA EN MEMORIA, MEDIDA en Chromium con un PDF de 20 páginas: el
+ * heap de la pestaña sube ~4.5 MB por página mientras dura la subida de UN
+ * archivo (pico 97 MB) y vuelve a 7 MB en cuanto termina — es un pico
+ * transitorio, no una fuga (retenido tras GC: 0.2 MB). El generador de
+ * `loadPagesBrowser` acota la parte de DECODIFICACIÓN a una página por vez;
+ * lo que se acumula son los resultados ya calculados, que la página suelta
+ * al terminar el archivo. Comparación con el fallo que motivó todo esto: el
+ * servidor acumulaba ~174 MB por página y moría a las 10 páginas.
+ *
+ * El hilo principal NO se bloquea, que es la razón de que exista este
+ * worker: durante esas 20 páginas el hueco máximo entre latidos de 50 ms fue
+ * de 82 ms, ninguno por encima de 100 ms.
  */
 
 import { analyzeSheet, type SheetOutcome } from "../../../../packages/engine/analyzeSheet.ts";

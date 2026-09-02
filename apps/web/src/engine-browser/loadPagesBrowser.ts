@@ -12,10 +12,15 @@
  * podría tumbar la pestaña igual que tumbó al servidor.
  *
  * Por eso acá la función es un GENERADOR ASÍNCRONO: entrega una página,
- * espera a que quien la llama la consuma (típicamente analyzeSheet(), que
- * no retiene la imagen una vez calificada), y recién ahí decodifica la
- * siguiente. En cualquier momento hay como mucho una página de más
- * retenida en memoria, sin importar cuántas traiga el archivo.
+ * espera a que quien la llama la consuma, y recién ahí decodifica la
+ * siguiente. En cualquier momento hay como mucho una página DECODIFICADA de
+ * más, sin importar cuántas traiga el archivo.
+ *
+ * ALCANCE EXACTO DE ESA GARANTÍA: acota la decodificación, no el resultado.
+ * Los `SheetOutcome` que produce el motor —con la hoja enderezada adentro—
+ * sí se acumulan hasta terminar el archivo (~4.5 MB por página, medido; ver
+ * omrWorker.ts). Es un pico transitorio que se libera al terminar, y queda
+ * ~39 veces por debajo de lo que acumulaba el servidor.
  */
 
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";

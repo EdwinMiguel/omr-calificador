@@ -19,10 +19,19 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
     try {
       const res = await uploadSheets(batchId, Array.from(files), setProgress);
       setResults((prev) => [...res.results, ...prev]);
-      onUploaded();
+      // Los archivos ilegibles se informan uno por uno, sin ocultar las hojas
+      // que sí entraron: son cosas independientes y el profesor necesita ver
+      // las dos (qué se guardó y qué tiene que volver a exportar).
+      if (res.failures.length > 0) {
+        setError(res.failures.map((f) => `${f.fileName}: ${f.message}`).join(" · "));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      // Siempre, incluso si algo falló: lo que alcanzó a guardarse ya está en
+      // IndexedDB, y dejar la vista sin refrescar mostraría un lote vacío
+      // que no corresponde con lo que de verdad hay guardado.
+      onUploaded();
       setBusy(false);
       setProgress(null);
     }
@@ -57,7 +66,7 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff"
+            accept=".pdf,.jpg,.jpeg,.png"
             hidden
             onChange={(e) => { void send(e.target.files); e.target.value = ""; }}
           />
