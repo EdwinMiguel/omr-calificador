@@ -13,6 +13,7 @@ import { grayImageToPngBlob } from "./sheetImageBrowser.ts";
 import { IndexedDbRepository } from "./indexedDbRepository.ts";
 import type { StoredSheet } from "../../../api/storage/types.ts";
 import type { AnswerKey } from "../../../../packages/engine/scoring.ts";
+import { ENGINE_VERSION } from "../../../../packages/engine/analyzeSheet.ts";
 
 async function sha256Hex(file: File): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
@@ -64,7 +65,7 @@ export async function uploadFileLocal(
       fileHash,
       fileName: file.name,
       pageIndex,
-      engineVersion: "0.1.0",
+      engineVersion: ENGINE_VERSION,
       outcome:
         outcome.kind === "processed"
           ? {

@@ -1,4 +1,4 @@
-import type { BatchDetail } from "../api/client.ts";
+import type { BatchDetail } from "../engine-browser/localClient.ts";
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Chip, Stat, ViewHead } from "../ui/primitives.tsx";
 

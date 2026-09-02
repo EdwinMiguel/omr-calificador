@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useBatches, useBatch, createBatch } from "./api/client.ts";
+import { useBatches, useBatch, createBatch } from "./engine-browser/localClient.ts";
 import { UI, SUPPORT } from "./strings.ts";
 import { Upload } from "./views/Upload.tsx";
 import { Results } from "./views/Results.tsx";

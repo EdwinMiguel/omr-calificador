@@ -10,8 +10,8 @@
  */
 
 import { useMemo, useState } from "react";
-import type { BatchDetail } from "../api/client.ts";
-import { postAnswerKey, readSheetAsAnswerKey } from "../api/client.ts";
+import type { BatchDetail } from "../engine-browser/localClient.ts";
+import { postAnswerKey, readSheetAsAnswerKey } from "../engine-browser/localClient.ts";
 import { UI } from "../strings.ts";
 import { Card, CardHead, ViewHead, Callout, Bubble } from "../ui/primitives.tsx";
 

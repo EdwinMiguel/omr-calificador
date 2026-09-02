@@ -63,34 +63,58 @@ export function buildReadingMarks(
 }
 
 /**
- * Dibuja el overlay sobre la imagen alineada y devuelve una URL de objeto
- * lista para un <img src>. Se usa URL de objeto y no data: URL a propósito
- * — un data: URL codifica en base64 (¬33% más pesado) y vive como string
- * gigante en el heap de JS; una URL de objeto solo referencia el Blob.
+ * Dibuja (opcionalmente) el overlay sobre la imagen alineada y devuelve una
+ * URL de objeto lista para un <img src>. Equivalente local de
+ * GET /api/sheets/:id/image del servidor — mismas dos opciones:
+ *
+ *   marks=null    → la hoja tal cual, sin intervención del programa. Es
+ *                   cómo se comprueba que un anillo no esté tapando una duda.
+ *   targetWidth   → redimensiona antes de codificar. MEDIDO del lado
+ *                   servidor: la hoja completa pesa ~1.8MB en PNG; a 1000px
+ *                   de ancho, ~680KB y se ve igual mientras está ajustada a
+ *                   la pantalla — la resolución completa solo hace falta al
+ *                   hacer zoom.
+ *
+ * Se usa URL de objeto y no data: URL a propósito — un data: URL codifica en
+ * base64 (~33% más pesado) y vive como string gigante en el heap de JS; una
+ * URL de objeto solo referencia el Blob.
  *
  * @returns la URL y una función para liberarla — quien la use debe llamarla
- * al desmontar, o la URL (y su Blob) quedan retenidos hasta recargar la
- * página.
+ * al desmontar o al pedir una nueva, o la URL (y su Blob) quedan retenidos
+ * hasta recargar la página.
  */
-export async function renderSheetOverlayUrl(
+export async function renderSheetImageUrl(
   aligned: GrayImage,
   template: Template,
   dpi: number,
-  marks: ReadingMark[]
+  marks: ReadingMark[] | null,
+  targetWidth?: number
 ): Promise<{ url: string; revoke: () => void }> {
-  const rgb = renderReadingOverlay(aligned, template, dpi, marks);
+  const rgb = marks ? renderReadingOverlay(aligned, template, dpi, marks) : null;
 
   const ctx = makeReadableCanvas(aligned.width, aligned.height);
   const imageData = ctx.createImageData(aligned.width, aligned.height);
   for (let i = 0, p = 0; p < imageData.data.length; i++, p += 4) {
-    imageData.data[p] = rgb[i * 3]!;
-    imageData.data[p + 1] = rgb[i * 3 + 1]!;
-    imageData.data[p + 2] = rgb[i * 3 + 2]!;
+    const gray = aligned.data[i]!;
+    imageData.data[p] = rgb ? rgb[i * 3]! : gray;
+    imageData.data[p + 1] = rgb ? rgb[i * 3 + 1]! : gray;
+    imageData.data[p + 2] = rgb ? rgb[i * 3 + 2]! : gray;
     imageData.data[p + 3] = 255;
   }
   ctx.putImageData(imageData, 0, 0);
 
-  const blob = await ctx.canvas.convertToBlob({ type: "image/png" });
+  let sourceCanvas: OffscreenCanvas = ctx.canvas;
+  if (targetWidth && targetWidth < aligned.width) {
+    const scale = targetWidth / aligned.width;
+    const outHeight = Math.round(aligned.height * scale);
+    const resized = new OffscreenCanvas(targetWidth, outHeight);
+    const rctx = resized.getContext("2d");
+    if (!rctx) throw new Error("No se pudo obtener contexto 2D para redimensionar");
+    rctx.drawImage(ctx.canvas, 0, 0, targetWidth, outHeight);
+    sourceCanvas = resized;
+  }
+
+  const blob = await sourceCanvas.convertToBlob({ type: "image/png" });
   const url = URL.createObjectURL(blob);
   return { url, revoke: () => URL.revokeObjectURL(url) };
 }

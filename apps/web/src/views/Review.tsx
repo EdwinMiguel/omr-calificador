@@ -7,8 +7,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import type { BatchDetail, SheetSummary } from "../api/client.ts";
-import { postCorrection } from "../api/client.ts";
+import type { BatchDetail, SheetSummary } from "../engine-browser/localClient.ts";
+import { postCorrection } from "../engine-browser/localClient.ts";
 import { UI, REVIEW_REASON } from "../strings.ts";
 import { Card, Chip, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
 import { SheetCanvas, type CanvasQuestion } from "../ui/SheetCanvas.tsx";

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { uploadSheets, type UploadResult, type UploadProgress } from "../api/client.ts";
+import { uploadSheets, type UploadResult, type UploadProgress } from "../engine-browser/localClient.ts";
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Callout, ViewHead, Bubble, Chip } from "../ui/primitives.tsx";
 
