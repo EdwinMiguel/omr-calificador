@@ -24,7 +24,7 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 // forma correcta de apuntar pdf.js a su propio worker bajo un bundler.
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import type { GrayImage } from "../../../../packages/engine/types.ts";
-import { decodeRasterBlob, grayscaleFromBitmap, SUPPORTED_RASTER_TYPES } from "./grayscale.ts";
+import { decodeRasterBlob, grayscaleFromContext, makeReadableCanvas } from "./grayscale.ts";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -58,9 +58,9 @@ async function* decodePdfPagesStreaming(
       const page = await doc.getPage(i);
       try {
         const viewport = page.getViewport({ scale });
-        const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("No se pudo obtener contexto 2D de OffscreenCanvas");
+        const width = Math.ceil(viewport.width);
+        const height = Math.ceil(viewport.height);
+        const ctx = makeReadableCanvas(width, height);
 
         // pdf.js tipa canvas/context para el DOM (HTMLCanvasElement); acá se
         // usa OffscreenCanvas a propósito (funciona en la página y en un
@@ -69,17 +69,15 @@ async function* decodePdfPagesStreaming(
         // son dos implementaciones de la misma API sin relación estructural
         // entre sus tipos.
         await page.render({
-          canvas: canvas as unknown as HTMLCanvasElement,
+          canvas: ctx.canvas as unknown as HTMLCanvasElement,
           canvasContext: ctx as unknown as CanvasRenderingContext2D,
           viewport,
         }).promise;
 
-        const bitmap = await createImageBitmap(canvas);
-        try {
-          yield grayscaleFromBitmap(bitmap);
-        } finally {
-          bitmap.close();
-        }
+        // Se lee directo del lienzo donde pdf.js dibujó. La alternativa
+        // (pasar por createImageBitmap y volver a dibujar en otro lienzo)
+        // duplicaba ~15 MB por página sin aportar nada.
+        yield grayscaleFromContext(ctx, width, height);
       } finally {
         // PDFPageProxy retiene sus propios recursos (fuentes, operator
         // list) hasta que se libera explícitamente — sin esto se acumulan
@@ -105,11 +103,8 @@ export async function* loadPagesBrowser(
   const ext = extOf(file.name);
 
   if (RASTER_EXTENSIONS.has(ext)) {
-    if (!SUPPORTED_RASTER_TYPES.has(file.type) && file.type !== "") {
-      throw new Error(`Tipo de archivo no reconocido por el navegador: '${file.type}' (${file.name})`);
-    }
     onPageCount?.(1);
-    yield await decodeRasterBlob(file);
+    yield await decodeRasterBlob(file, file.name);
     return;
   }
 
