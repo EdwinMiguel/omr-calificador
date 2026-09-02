@@ -149,7 +149,9 @@ export async function analyzeSheet(
   const fillFn = (group: BubbleGroup): LabeledFill[] =>
     group.bubbles.map((b) => ({
       label: b.label,
-      normalized: normalize(fillRatioNearby(geo.normalized, bubbleRoi(b, template, dpi)), calibration),
+      normalized: normalize(
+        fillRatioNearby(geo.normalized, bubbleRoi(b, template, dpi)), calibration, b.center.x, b.center.y
+      ),
     }));
 
   const digitGroups = template.groups.filter((g) => g.kind === "digit");
