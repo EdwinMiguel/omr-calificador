@@ -10,6 +10,7 @@
  */
 
 import { findFiducialsRobust } from "./fiducials.ts";
+import { scaleForDetection, scalePoints, detectionWidthsFor } from "./detectionScale.ts";
 import { computeHomography, warpToCanonical, type Point } from "./homography.ts";
 import { fillRatio } from "./measurement.ts";
 import { canonicalMarkers, canvasSize, mmToPx, type Template } from "../../template.ts";
@@ -117,12 +118,28 @@ async function resolveOrientationAndWarp(
 export async function analyzeGeometry(
   img: GrayImage, template: Template, dpi: number
 ): Promise<GeometryOutcome> {
-  const found = await findFiducialsRobust(img);
-  if (!found) return { kind: "rejected", reason: "MARKERS_NOT_FOUND" };
+  // Los marcadores se buscan a escalas conocidas (ver detectionScale.ts):
+  // los umbrales de forma y área de fiducials.ts son valores absolutos en
+  // píxeles, así que sin esto una foto de más resolución confunde burbujas
+  // rellenadas con marcadores. Se prueban varias escalas porque ninguna
+  // funciona para todas las fotos — misma estrategia que findFiducialsRobust
+  // con los métodos de umbral. El enderezado se hace después desde `img`
+  // ORIGINAL, para no perder detalle de medición.
+  let found: Awaited<ReturnType<typeof findFiducialsRobust>> = null;
+  let corners: Point[] | null = null;
 
-  const resolved = await resolveOrientationAndWarp(
-    img, found.markers.map((m) => m.centerPx), template, dpi
-  );
+  for (const width of detectionWidthsFor(img)) {
+    const scaled = await scaleForDetection(img, width);
+    const attempt = await findFiducialsRobust(scaled.image);
+    if (!attempt) continue;
+    found = attempt;
+    corners = scalePoints(attempt.markers.map((m) => m.centerPx), scaled.scaleToOriginal);
+    break;
+  }
+
+  if (!found || !corners) return { kind: "rejected", reason: "MARKERS_NOT_FOUND" };
+
+  const resolved = await resolveOrientationAndWarp(img, corners, template, dpi);
   if (!resolved) return { kind: "rejected", reason: "BAD_HOMOGRAPHY" };
 
   return {
