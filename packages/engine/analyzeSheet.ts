@@ -28,8 +28,28 @@ export type RejectionReason =
   | "CALIBRATION_FAILED";
 
 export type SheetOutcome =
-  | { kind: "processed"; result: SheetResult }
-  | { kind: "rejected"; reason: RejectionReason; partial?: PartialRead };
+  | { kind: "processed"; result: SheetResult; alignedImage: GrayImage }
+  | { kind: "rejected"; reason: RejectionReason; partial?: PartialRead; alignedImage?: GrayImage };
+
+/**
+ * `alignedImage` — la hoja ya enderezada, PARA MOSTRAR (overlay de qué se
+ * leyó, comparación visual, PROMPT.md §8). El servidor la recalcula bajo
+ * demanda (analyzeGeometry corre de nuevo cuando alguien pide ver la hoja,
+ * y la cachea en disco desde ahí) porque un archivo con miles de hojas no
+ * tiene sentido guardarlas todas de entrada. En el navegador no hay ese
+ * "disco del servidor": si no viaja acá, se pierde — recalcularla implicaría
+ * repetir el análisis completo solo para poder mostrar una imagen. Por eso
+ * ahora se entrega siempre que exista, y es la propia capa de
+ * almacenamiento (servidor o IndexedDB) la que decide si la guarda o no.
+ *
+ * Presente en CUALQUIER resultado donde la geometría llegó a resolverse:
+ * "processed", pero también "rejected" por STUDENT_ID_UNREADABLE o
+ * CALIBRATION_FAILED — en ambos casos la hoja ya se enderezó antes de que
+ * fallara el paso siguiente, y poder verla ayuda a entender por qué falló
+ * (ej. mirar si los parches de calibración salieron manchados). Ausente
+ * en BLANK_PAGE, MARKERS_NOT_FOUND y BAD_HOMOGRAPHY: ahí no hay ninguna
+ * imagen enderezada que mostrar, la hoja nunca llegó a alinearse.
+ */
 
 /**
  * Lo que SÍ se alcanzó a leer en una hoja que igual se rechaza.
@@ -123,7 +143,7 @@ export async function analyzeSheet(
   try {
     calibration = deriveThresholds(geo.normalized, template, dpi);
   } catch {
-    return { kind: "rejected", reason: "CALIBRATION_FAILED" };
+    return { kind: "rejected", reason: "CALIBRATION_FAILED", alignedImage: geo.normalized };
   }
 
   const fillFn = (group: BubbleGroup): LabeledFill[] =>
@@ -160,6 +180,7 @@ export async function analyzeSheet(
         thresholdMethod: geo.thresholdMethod,
         studentIdColumns: id.columns.map((c) => ({ ordinal: c.ordinal, state: c.state })),
       },
+      alignedImage: geo.normalized,
     };
   }
 
@@ -178,5 +199,6 @@ export async function analyzeSheet(
       measurements,
       score,
     },
+    alignedImage: geo.normalized,
   };
 }
