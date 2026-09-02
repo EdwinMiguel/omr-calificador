@@ -1,0 +1,67 @@
+/**
+ * fonts.css — Archivo, IBM Plex Sans e IBM Plex Mono servidas desde este
+ * mismo origen, en vez de fonts.googleapis.com / fonts.gstatic.com.
+ *
+ * POR QUÉ: el motor OMR ya corre entero en el navegador (ver
+ * engine-browser/) — la app funciona sin conexión salvo por estas dos
+ * peticiones a Google que quedaban colgando en index.html. Para el
+ * escenario real (colegio con wifi débil o sin internet en el aula) esa
+ * dependencia no tenía sentido: es texto de interfaz, no algo que necesite
+ * estar siempre actualizado.
+ *
+ * Archivo e IBM Plex Sans son FUENTES VARIABLES en los pesos que usa esta
+ * app: Google sirvió el MISMO archivo .woff2 para los tres pesos pedidos
+ * (comprobado bajando el CSS con user-agent de navegador moderno — 500,
+ * 600 y 700 de Archivo apuntan al mismo binario; igual 400/500/600 de IBM
+ * Plex Sans), así que un solo archivo por familia cubre el rango completo
+ * declarando `font-weight` como intervalo. IBM Plex Mono NO es variable en
+ * los pesos usados acá: Google sirvió tres archivos distintos, uno por
+ * peso, y así se guardan.
+ *
+ * SOLO el subconjunto "latin" (U+0000-00FF): la app es 100% en español, y
+ * tildes/ñ/ü caen dentro de ese rango — vietnamita, cirílico y griego (que
+ * Google ofrece por defecto) no aportan nada acá y solo pesarían más.
+ *
+ * Licencia: SIL Open Font License 1.1 en ambas familias — permite
+ * redistribuir el archivo tal cual, que es lo que se hace acá.
+ */
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("./assets/fonts/archivo-variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("./assets/fonts/plex-sans-variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-600.woff2") format("woff2");
+}
