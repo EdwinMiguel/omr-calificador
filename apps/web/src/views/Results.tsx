@@ -1,4 +1,8 @@
-import type { BatchDetail, SheetSummary } from "../api/client.ts";
+import { useState } from "react";
+import type { BatchDetail, SheetSummary } from "../engine-browser/localClient.ts";
+import { repo } from "../engine-browser/localClient.ts";
+import { gradesToCsv, downloadBlob } from "../engine-browser/exportGrades.ts";
+import { exportBatchBackup, backupFileName } from "../engine-browser/backupRestore.ts";
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Chip, Stat, ViewHead, Empty, Callout } from "../ui/primitives.tsx";
 
@@ -14,7 +18,30 @@ export function Results({
   onGoReview: () => void;
   onGoRejected: () => void;
 }) {
-  const { sheets, metrics, answerKey } = detail;
+  const { sheets, metrics, answerKey, batch } = detail;
+  const [busy, setBusy] = useState<"csv" | "backup" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleExportCsv() {
+    setBusy("csv"); setError(null);
+    try {
+      downloadBlob(gradesToCsv(detail), `notas-${batch.label.replace(/[^\p{L}\p{N}]+/gu, "-")}.csv`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleBackup() {
+    setBusy("backup"); setError(null);
+    try {
+      const blob = await exportBatchBackup(batch.id, repo);
+      downloadBlob(blob, backupFileName(batch));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const clean = sheets.filter((s) => s.projected && s.projected.pendingOrdinals.length === 0).length;
   const withDoubts = sheets.filter((s) => s.projected && s.projected.pendingOrdinals.length > 0).length;
@@ -30,6 +57,16 @@ export function Results({
       <ViewHead title={UI.results.title} lead={UI.results.lead} />
       <div className="stack">
         {!answerKey && <Callout tone="warn">{UI.results.noKey}</Callout>}
+        {error && <Callout tone="warn"><strong>{UI.common.error}.</strong> {error}</Callout>}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn btn--sm" disabled={busy !== null || sheets.length === 0} onClick={() => void handleExportCsv()}>
+            {busy === "csv" ? UI.common.loading : UI.results.exportCsv}
+          </button>
+          <button className="btn btn--sm" disabled={busy !== null || sheets.length === 0} onClick={() => void handleBackup()}>
+            {busy === "backup" ? UI.common.loading : UI.results.downloadBackup}
+          </button>
+        </div>
 
         <div className="statgrid">
           <Stat tone="ok" label={UI.results.graded} value={clean} note={`de ${UI.common.sheets(sheets.length)}`} />

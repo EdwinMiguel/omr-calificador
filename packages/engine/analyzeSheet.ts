@@ -10,9 +10,9 @@ import type { GrayImage } from "./types.ts";
 import type { Template, BubbleGroup } from "../../template.ts";
 import { bubbleRoi } from "../../template.ts";
 import { analyzeGeometry } from "./geometry.ts";
-import { deriveThresholds, normalize } from "./calibration.ts";
+import { deriveThresholds, normalize, normalizeWithinGroup } from "./calibration.ts";
 import { fillRatioNearby } from "./measurement.ts";
-import { classify, type LabeledFill, type ClassificationState } from "./classification.ts";
+import { classify, deriveSheetMarkContext, type LabeledFill, type ClassificationState } from "./classification.ts";
 import { decodeDigitGrid } from "./identification.ts";
 import { gradeQuestions, computeScore, type AnswerKey, type QuestionResult, type Score } from "./scoring.ts";
 
@@ -28,8 +28,28 @@ export type RejectionReason =
   | "CALIBRATION_FAILED";
 
 export type SheetOutcome =
-  | { kind: "processed"; result: SheetResult }
-  | { kind: "rejected"; reason: RejectionReason; partial?: PartialRead };
+  | { kind: "processed"; result: SheetResult; alignedImage: GrayImage }
+  | { kind: "rejected"; reason: RejectionReason; partial?: PartialRead; alignedImage?: GrayImage };
+
+/**
+ * `alignedImage` — la hoja ya enderezada, PARA MOSTRAR (overlay de qué se
+ * leyó, comparación visual, PROMPT.md §8). El servidor la recalcula bajo
+ * demanda (analyzeGeometry corre de nuevo cuando alguien pide ver la hoja,
+ * y la cachea en disco desde ahí) porque un archivo con miles de hojas no
+ * tiene sentido guardarlas todas de entrada. En el navegador no hay ese
+ * "disco del servidor": si no viaja acá, se pierde — recalcularla implicaría
+ * repetir el análisis completo solo para poder mostrar una imagen. Por eso
+ * ahora se entrega siempre que exista, y es la propia capa de
+ * almacenamiento (servidor o IndexedDB) la que decide si la guarda o no.
+ *
+ * Presente en CUALQUIER resultado donde la geometría llegó a resolverse:
+ * "processed", pero también "rejected" por STUDENT_ID_UNREADABLE o
+ * CALIBRATION_FAILED — en ambos casos la hoja ya se enderezó antes de que
+ * fallara el paso siguiente, y poder verla ayuda a entender por qué falló
+ * (ej. mirar si los parches de calibración salieron manchados). Ausente
+ * en BLANK_PAGE, MARKERS_NOT_FOUND y BAD_HOMOGRAPHY: ahí no hay ninguna
+ * imagen enderezada que mostrar, la hoja nunca llegó a alinearse.
+ */
 
 /**
  * Lo que SÍ se alcanzó a leer en una hoja que igual se rechaza.
@@ -83,8 +103,26 @@ export interface SheetResult {
 
 /** PROMPT.md §6: "guarda siempre engineVersion... para poder reevaluar el
  * histórico si el algoritmo cambia". Subir esto es un cambio deliberado,
- * no un detalle — significa "algo en el pipeline de análisis cambió". */
-export const ENGINE_VERSION = "0.1.0";
+ * no un detalle — significa "algo en el pipeline de análisis cambió".
+ *
+ * 0.1.0 → 0.2.0: las preguntas se normalizan contra la referencia de papel
+ * de su propia fila (calibration.ts::normalizeWithinGroup) en vez de contra
+ * la de vecindario, y BLANK exige que ninguna opción se despegue
+ * (classification.ts::BLANK_MARGIN_MAX).
+ *
+ * 0.2.0 → 0.3.0: el radio de búsqueda de fillRatioNearby baja de ±15 a ±8
+ * px y BLANK_MARGIN_MAX de 0.06 a 0.02, ambos recalibrados contra una
+ * TERCERA hoja con verdad conocida (IMG_20260830_174156.jpg, marcas de
+ * lápiz muy tenues).
+ *
+ * 0.3.0 → 0.3.1: baja el piso de la regla de rescate (classification.ts,
+ * PROMOTE_MIN_LEVEL_FRACTION y PROMOTE_NOISE_MARGIN). Solo cambia qué se
+ * resuelve y qué va a revisión; la ESCALA de `measurements` es la misma que
+ * en 0.3.0, así que esos números sí son comparables entre las dos.
+ *
+ * Los `measurements` de 0.2.x y anteriores están en otra escala: comparables
+ * entre sí, NO comparables uno a uno con los de 0.3.x. */
+export const ENGINE_VERSION = "0.3.1";
 
 /**
  * MEDIDO de forma indirecta, no contra una foto de papel genuinamente en
@@ -123,27 +161,65 @@ export async function analyzeSheet(
   try {
     calibration = deriveThresholds(geo.normalized, template, dpi);
   } catch {
-    return { kind: "rejected", reason: "CALIBRATION_FAILED" };
+    return { kind: "rejected", reason: "CALIBRATION_FAILED", alignedImage: geo.normalized };
   }
 
-  const fillFn = (group: BubbleGroup): LabeledFill[] =>
+  const measureGroup = (group: BubbleGroup) =>
     group.bubbles.map((b) => ({
       label: b.label,
-      normalized: normalize(fillRatioNearby(geo.normalized, bubbleRoi(b, template, dpi)), calibration),
+      raw: fillRatioNearby(geo.normalized, bubbleRoi(b, template, dpi)),
+      xMm: b.center.x,
+      yMm: b.center.y,
     }));
+
+  /** Referencia de papel por VECINDARIO: la de toda la vida. */
+  const fillFn = (group: BubbleGroup): LabeledFill[] =>
+    measureGroup(group).map((b) => ({
+      label: b.label,
+      normalized: normalize(b.raw, calibration, b.xMm, b.yMm),
+    }));
+
+  /**
+   * Referencia de papel por GRUPO: las otras opciones de la misma pregunta
+   * (calibration.ts::normalizeWithinGroup). Se aplica SOLO a las preguntas,
+   * igual que el contexto de rescate más abajo y por la misma razón: se
+   * midió contra las 199 respuestas de las dos hojas con verdad conocida, y
+   * ninguna de esas verdades incluye el código del alumno. Cambiar cómo se
+   * lee el código sin poder comprobarlo contra una verdad sería justo el
+   * tipo de asunción que PROMPT.md §14 prohíbe — y un dígito mal leído le
+   * cambia el dueño a la hoja entera.
+   */
+  const fillQuestion = (group: BubbleGroup): LabeledFill[] => {
+    const measured = measureGroup(group);
+    const normalized = normalizeWithinGroup(measured, calibration);
+    return measured.map((b, i) => ({ label: b.label, normalized: normalized[i]! }));
+  };
 
   const digitGroups = template.groups.filter((g) => g.kind === "digit");
   const id = decodeDigitGrid(digitGroups, fillFn);
 
+  // Se mide TODO primero y se clasifica después, en dos pasadas: la segunda
+  // necesita saber cuánto mide una marca —y cuánto mide el ruido— en ESTA
+  // hoja, y eso solo se sabe una vez medidas todas las preguntas. Ver
+  // deriveSheetMarkContext() en classification.ts.
   const questionGroups = template.groups.filter((g) => g.kind === "question");
   const measurements: Measurements = {};
-  const states = questionGroups.map((g) => {
-    const fills = fillFn(g);
+  const measuredQuestions = questionGroups.map((g) => {
+    const fills = fillQuestion(g);
     measurements[g.ordinal] = Object.fromEntries(
       fills.map((f) => [f.label, Math.round(f.normalized * 1000) / 1000])
     );
-    return { ordinal: g.ordinal, state: classify(fills) };
+    return { ordinal: g.ordinal, fills };
   });
+
+  // El contexto se pasa SOLO a las preguntas. `decodeDigitGrid` de más
+  // arriba clasifica el código sin él a propósito: una respuesta mal leída
+  // afecta una nota, un dígito mal leído le cambia el dueño a la hoja.
+  const sheetContext = deriveSheetMarkContext(measuredQuestions.map((q) => q.fills));
+  const states = measuredQuestions.map(({ ordinal, fills }) => ({
+    ordinal,
+    state: classify(fills, sheetContext),
+  }));
   const questions = gradeQuestions(states, answerKey);
 
   // PROMPT.md §13.8 (mismo principio, aplicado al ID): una hoja cuyo
@@ -160,6 +236,7 @@ export async function analyzeSheet(
         thresholdMethod: geo.thresholdMethod,
         studentIdColumns: id.columns.map((c) => ({ ordinal: c.ordinal, state: c.state })),
       },
+      alignedImage: geo.normalized,
     };
   }
 
@@ -178,5 +255,6 @@ export async function analyzeSheet(
       measurements,
       score,
     },
+    alignedImage: geo.normalized,
   };
 }

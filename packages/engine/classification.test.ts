@@ -1,8 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { classify, BLANK_MAX, MARK_MIN, MARGIN_MIN } from "./classification.ts";
+import { classify, deriveSheetMarkContext, BLANK_MAX, MARK_MIN, MARGIN_MIN, BLANK_MARGIN_MAX } from "./classification.ts";
 
 const opts = (values: number[]): { label: string; normalized: number }[] =>
   values.map((v, i) => ({ label: "ABCDE"[i]!, normalized: v }));
+
+/**
+ * Una pregunta genuinamente sin contestar: cinco opciones dentro del ruido,
+ * SIN que ninguna se despegue. Escrita relativa a BLANK_MARGIN_MAX y no con
+ * números fijos, por la misma razón que el resto del archivo: si se recalibra
+ * el umbral, el caso tiene que seguir significando lo mismo.
+ */
+const sinGanador = () => {
+  const r = BLANK_MARGIN_MAX * 0.4;
+  return opts([r * 0.5, r, r * 0.2, r * 0.7, 0]);
+};
 
 /**
  * Los casos se expresan RELATIVOS a los umbrales, no con números fijos.
@@ -19,8 +30,8 @@ describe("classify — los 7 casos límite del plan (Día 9)", () => {
     expect(classify(opts([0.05, 0.9, 0.03, 0.02, 0.04]))).toEqual({ kind: "ANSWERED", option: "B" });
   });
 
-  it("blanco: todas cerca de 0", () => {
-    expect(classify(opts([0.02, 0.05, 0.01, 0.03, 0.0]))).toEqual({ kind: "BLANK" });
+  it("blanco: todas cerca de 0 y ninguna despegada de las demás", () => {
+    expect(classify(sinGanador())).toEqual({ kind: "BLANK" });
   });
 
   it("doble: dos burbujas claramente marcadas", () => {
@@ -77,5 +88,113 @@ describe("classify — los 7 casos límite del plan (Día 9)", () => {
     // ganaría siempre: nada podría clasificarse nunca como respuesta.
     expect(BLANK_MAX).toBeLessThan(MARK_MIN);
     expect(MARGIN_MIN).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * El rescate de marcas reales que no llegan a MARK_MIN (caso Q97: marca de
+ * tinta normal pero con menos cobertura, que medía 0.236 contra un umbral de
+ * 0.25, con la segunda opción en 0.04 — o sea, sin ninguna duda sobre CUÁL
+ * marcó). Ver la nota extensa en classification.ts.
+ */
+describe("classify — rescate con el contexto de la hoja", () => {
+  /** Una hoja sana: marcas alrededor de 0.40, ruido bajo. */
+  const hojaLimpia = deriveSheetMarkContext([
+    ...Array.from({ length: 30 }, () => opts([0.40, 0.03, 0.02, 0.01, 0.04])),
+  ]);
+
+  it("rescata el caso Q97: ganador inequívoco, parecido a una marca de esta hoja", () => {
+    const casoQ97 = opts([0.236, 0.04, 0.005, -0.001, -0.024]);
+    // Sin contexto —como se clasifica el código del alumno— sigue dudosa.
+    expect(classify(casoQ97).kind).toBe("AMBIGUOUS");
+    // Con el contexto de la hoja, se resuelve.
+    expect(classify(casoQ97, hojaLimpia)).toEqual({ kind: "ANSWERED", option: "A" });
+  });
+
+  it("NO inventa respuesta en una pregunta en blanco con ruido: el piso sube con el ruido de la hoja", () => {
+    // Misma hoja pero sucia: sus propias perdedoras llegan alto, así que el
+    // piso se levanta solo y la misma medición ya no alcanza.
+    const hojaSucia = deriveSheetMarkContext([
+      ...Array.from({ length: 30 }, () => opts([0.40, 0.22, 0.19, 0.05, 0.03])),
+    ]);
+    expect(hojaSucia.noiseHigh).toBeGreaterThan(hojaLimpia.noiseHigh);
+    expect(classify(opts([0.236, 0.04, 0.005, 0.0, 0.0]), hojaSucia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata si la segunda opción está cerca: ahí la duda es CUÁL, no si marcó", () => {
+    expect(classify(opts([0.236, 0.20, 0.01, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata una marca demasiado floja para lo que mide marcar en esta hoja", () => {
+    // Muy por debajo de la marca típica de la hoja, aunque gane por lejos.
+    // Escrito como fracción de markLevel y no con un número fijo: el piso de
+    // rescate se recalibra con evidencia (ver PROMOTE_MIN_LEVEL_FRACTION) y
+    // el caso tiene que seguir significando "demasiado floja" después.
+    const demasiadoFloja = hojaLimpia.markLevel * 0.3;
+    expect(classify(opts([demasiadoFloja, 0.01, 0.0, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata si la hoja no tiene suficientes marcas confiables de las que fiarse", () => {
+    const hojaPobre = deriveSheetMarkContext([
+      ...Array.from({ length: 3 }, () => opts([0.40, 0.03, 0.02, 0.01, 0.04])),
+    ]);
+    expect(hojaPobre.confidentMarks).toBeLessThan(10);
+    expect(classify(opts([0.236, 0.04, 0.005, 0.0, 0.0]), hojaPobre).kind).toBe("AMBIGUOUS");
+  });
+
+  it("no toca lo que ya se decidía: en blanco sigue en blanco, marca clara sigue clara", () => {
+    expect(classify(sinGanador(), hojaLimpia).kind).toBe("BLANK");
+    expect(classify(opts([0.05, 0.9, 0.03, 0.02, 0.04]), hojaLimpia)).toEqual({ kind: "ANSWERED", option: "B" });
+  });
+});
+
+/**
+ * La guarda de blanco. BLANK se AUTO-ACEPTA —la pregunta cuenta como no
+ * contestada y nadie la revisa— así que exigirle una prueba de margen es
+ * lo mismo que ya se le exige a ANSWERED. Ver BLANK_MARGIN_MAX.
+ */
+describe("classify — guarda de blanco", () => {
+  it(
+    "REGRESIÓN Q95: una opción que se despega del resto NO es una pregunta " +
+    "sin contestar, aunque no llegue a BLANK_MAX",
+    () => {
+      // Números reales de Q95 de ground-truth/IMG_20260830_172453.json (foto
+      // de celular, verdad dictada antes de procesar): el alumno marcó C.
+      // Medía 0.147 contra BLANK_MAX=0.15 y el motor la daba por no
+      // contestada, auto-aceptando una nota mal calculada.
+      const q95 = opts([-0.065, -0.071, 0.147, -0.051, 0.014]);
+      expect(q95[2]!.normalized).toBeLessThan(BLANK_MAX);
+      expect(classify(q95).kind).toBe("AMBIGUOUS");
+    }
+  );
+
+  it("una pregunta genuinamente en blanco sigue siendo BLANK: nadie se despega", () => {
+    // Las cinco opciones dentro del ruido de la hoja, sin ganador.
+    expect(classify(sinGanador()).kind).toBe("BLANK");
+    // Justo por debajo del margen de la guarda: sigue siendo blanco.
+    const casi = BLANK_MARGIN_MAX * 0.9;
+    expect(classify(opts([casi, 0.0, 0.0, 0.0, 0.0])).kind).toBe("BLANK");
+  });
+
+  it(
+    "la guarda solo puede mandar a revisión, nunca producir una respuesta — " +
+    "ni siquiera con el contexto de una hoja que rescataría",
+    () => {
+      const hoja = deriveSheetMarkContext([
+        ...Array.from({ length: 30 }, () => opts([0.40, 0.03, 0.02, 0.01, 0.04])),
+      ]);
+      // Por debajo de BLANK_MAX el rescate ni siquiera se evalúa: la rama de
+      // promoción vive más abajo, en la franja BLANK_MAX-MARK_MIN.
+      const r = classify(opts([BLANK_MAX - 0.001, 0.0, 0.0, 0.0, 0.0]), hoja);
+      expect(r.kind).toBe("AMBIGUOUS");
+      expect(r.kind).not.toBe("ANSWERED");
+    }
+  );
+
+  it("el margen de la guarda es más exigente que el ruido de una hoja limpia", () => {
+    // Si BLANK_MARGIN_MAX fuera 0, toda pregunta en blanco con un pelo de
+    // ruido en una opción iría a revisión y la cola se volvería inútil.
+    expect(BLANK_MARGIN_MAX).toBeGreaterThan(0);
+    expect(BLANK_MARGIN_MAX).toBeLessThan(BLANK_MAX);
   });
 });

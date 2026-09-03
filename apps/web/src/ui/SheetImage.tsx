@@ -13,23 +13,22 @@
 
 import { useState } from "react";
 import { UI } from "../strings.ts";
+import { useSheetImageUrl } from "../engine-browser/localClient.ts";
 
 type Zoom = "fit" | "full";
 
 export function SheetImage({ sheetId }: { sheetId: string }) {
   const [overlay, setOverlay] = useState(true);
   const [zoom, setZoom] = useState<Zoom>("fit");
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
 
   // MEDIDO: la hoja completa a 200 dpi pesa ~1.8 MB en PNG; a 1000 px de
   // ancho, ~680 KB y se ve idéntica mientras está ajustada a la pantalla.
   // La resolución completa se pide solo al hacer zoom, que es cuando de
   // verdad hace falta distinguir una marca floja de una mancha.
-  const src = `/api/sheets/${sheetId}/image?overlay=${overlay ? 1 : 0}` +
-    (zoom === "fit" ? "&width=1000" : "");
+  const image = useSheetImageUrl(sheetId, overlay, zoom === "fit" ? 1000 : undefined);
+  const loading = image.loading;
 
-  if (failed) {
+  if (image.error) {
     return (
       <div className="sheet-image-empty">{UI.detail.imageUnavailable}</div>
     );
@@ -42,7 +41,7 @@ export function SheetImage({ sheetId }: { sheetId: string }) {
           <input
             type="checkbox"
             checked={overlay}
-            onChange={(e) => { setOverlay(e.target.checked); setLoading(true); }}
+            onChange={(e) => setOverlay(e.target.checked)}
           />
           <span>{UI.detail.showMarks}</span>
         </label>
@@ -53,7 +52,7 @@ export function SheetImage({ sheetId }: { sheetId: string }) {
         <button
           className="btn btn--sm"
           style={{ marginLeft: "auto" }}
-          onClick={() => { setZoom((z) => (z === "fit" ? "full" : "fit")); setLoading(true); }}
+          onClick={() => setZoom((z) => (z === "fit" ? "full" : "fit"))}
         >
           {zoom === "fit" ? UI.detail.zoomIn : UI.detail.zoomFit}
         </button>
@@ -61,13 +60,13 @@ export function SheetImage({ sheetId }: { sheetId: string }) {
 
       <div className={`sheet-image-viewport${zoom === "full" ? " is-full" : ""}`}>
         {loading && <div className="sheet-image-loading">{UI.common.loading}</div>}
-        <img
-          src={src}
-          alt={UI.detail.imageAlt}
-          className={zoom === "full" ? "is-full" : undefined}
-          onLoad={() => setLoading(false)}
-          onError={() => { setLoading(false); setFailed(true); }}
-        />
+        {image.data && (
+          <img
+            src={image.data}
+            alt={UI.detail.imageAlt}
+            className={zoom === "full" ? "is-full" : undefined}
+          />
+        )}
       </div>
     </div>
   );

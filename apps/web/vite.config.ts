@@ -3,6 +3,16 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+
+  // Los workers se empaquetan como módulos ES, no como el `iife` que Vite
+  // usa por defecto. Motivo concreto: el worker del motor OMR carga pdf.js,
+  // que internamente divide su código en varios trozos, y el formato iife no
+  // admite división de código — el build falla con "UMD and IIFE output
+  // formats are not supported for code-splitting builds".
+  //
+  // Requiere soporte de workers de tipo módulo: Chrome 80+, Firefox 114+,
+  // Safari 15+. Cualquier navegador actualizado lo cumple.
+  worker: { format: "es" },
   server: {
     port: 5173,
     // El navegador habla siempre con el mismo origen; el proxy evita CORS

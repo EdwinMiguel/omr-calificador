@@ -1,4 +1,4 @@
-import { useSheet, type Correction } from "../api/client.ts";
+import { useSheet, type Correction } from "../engine-browser/localClient.ts";
 import { UI } from "../strings.ts";
 import { Card, CardHead, Stat, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
 import { SheetImage } from "../ui/SheetImage.tsx";

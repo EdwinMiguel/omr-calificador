@@ -46,19 +46,61 @@ export type RoiPx = { x: number; y: number; w: number; h: number };
 
 /**
  * MEDIDO — foto real, dataset de hojas marcadas: barriendo el ROI nominal
- * de una burbuja conocida-marcada en un radio de ±20px, el pico real de
- * tinta aparecía consistentemente desplazado 8-15px del centro que el
- * Template predice — no en una sola burbuja, en varias, y con magnitud
- * variable según la zona de la página (más en unas, casi nulo en otras).
- * Es compatible con distorsión de lente residual (una homografía pura
- * corrige perspectiva, no la curvatura de una lente de celular) más el
- * error normal de una mano llenando un círculo sin apuntar al milímetro.
+ * de una burbuja conocida-marcada, el pico real de tinta aparece desplazado
+ * del centro que el Template predice — no en una sola burbuja, en varias, y
+ * con magnitud variable según la zona de la página. Es compatible con
+ * distorsión de lente residual (una homografía pura corrige perspectiva, no
+ * la curvatura de una lente de celular) más el error normal de una mano
+ * llenando un círculo sin apuntar al milímetro.
  *
- * SEARCH_RADIUS_PX: hasta dónde se permite buscar el pico antes de
- * rendirse y usar el centro nominal. CALIBRAR si aparecen fotos con
- * desfases mayores — por ahora cubre lo observado (máximo visto: 15px).
+ * SEARCH_RADIUS_PX: hasta dónde se permite buscar el pico.
+ *
+ * ── 15 → 8 (2026-09-03), medido, no estimado ────────────────────────────
+ *
+ * La primera versión usaba 15 px, tomado del máximo desfase observado a ojo
+ * en unas pocas burbujas. Al medir el desfase del máximo sobre TODAS las
+ * marcas de alta confianza de las 12 hojas alineadas, la componente
+ * sistemática resultó bastante menor:
+ *
+ *   mediana por hoja ......... dx entre -3 y 5 px, dy entre 1 y 7 px
+ *   p10-p90 por hoja ......... dentro de ±9 px en 10 de las 12 hojas
+ *   marcas en el borde ±13 ... entre 0% y 11% según la hoja
+ *
+ * (La excepción, marcada-03 con mediana dy=15, tiene 2 marcas confiables:
+ * su mediana no significa nada.)
+ *
+ * Y el radio de más no sale gratis. La búsqueda se aplica IGUAL a toda
+ * burbuja, marcada o no — tiene que ser así para que la comparación entre
+ * opciones sea justa — pero en una burbuja SIN marcar no hay ningún pico
+ * que encontrar: el máximo de 225 posiciones solo encuentra la cola alta
+ * del ruido y del anillo impreso vecino. Eso infla las opciones vacías y se
+ * come el margen de la marcada. Se nota justo donde más duele, en marcas
+ * tenues: en foto-174156 el margen de las 8 marcas más flojas sube de 0.004
+ * a 0.022 al pasar de ±15 a ±8.
+ *
+ * BRECHA de separación (peor marca verdadera − mejor no-marca verdadera),
+ * sobre las TRES hojas con verdad dictada antes de procesar (§14):
+ *
+ *   radio    posiciones    escaneada   celular-172453   celular-174156
+ *    ±15        225          0.144         0.107            -0.082
+ *    ±11        121          0.206         0.109            -0.055
+ *    ±8          81          0.215         0.110            -0.037   ← óptimo
+ *    ±5          25          0.206         0.086            -0.057
+ *    ±3           9          0.232         0.083            -0.068
+ *    nominal      1          0.273         0.057            -0.053
+ *
+ * ±8 es el mejor o empata en las tres. Por debajo de ±8 la brecha se
+ * degrada: ahí sí falta radio para el desfase real. Sobre las 12 hojas
+ * (1200 preguntas) el cambio no movió NINGUNA respuesta de una letra a
+ * otra; 83 pasaron de pendiente a resuelta y 3 al revés.
+ *
+ * De paso: medir las 500 burbujas pasa de 177 ms a 55 ms.
+ *
+ * CALIBRAR si aparecen fotos con desfases mayores — la forma de
+ * comprobarlo es la de arriba: medir el desfase del máximo en marcas de
+ * alta confianza y mirar qué fracción toca el borde de la ventana.
  */
-const SEARCH_RADIUS_PX = 15;
+export const SEARCH_RADIUS_PX = 8;
 const SEARCH_STEP_PX = 2;
 
 /**

@@ -6,8 +6,9 @@
  * del prototipo que se aprobó antes de escribir esto.
  */
 
-import { useEffect, useState } from "react";
-import { useBatches, useBatch, createBatch } from "./api/client.ts";
+import { useEffect, useRef, useState } from "react";
+import { useBatches, useBatch, createBatch, repo } from "./engine-browser/localClient.ts";
+import { importBatchBackup } from "./engine-browser/backupRestore.ts";
 import { UI, SUPPORT } from "./strings.ts";
 import { Upload } from "./views/Upload.tsx";
 import { Results } from "./views/Results.tsx";
@@ -16,7 +17,7 @@ import { Rejected } from "./views/Rejected.tsx";
 import { AnswerKeyView } from "./views/AnswerKeyView.tsx";
 import { SheetDetail } from "./views/SheetDetail.tsx";
 import { Metrics } from "./views/Metrics.tsx";
-import { Chip, Empty } from "./ui/primitives.tsx";
+import { Chip, Empty, Callout } from "./ui/primitives.tsx";
 
 type View = "cargar" | "resultados" | "revision" | "rechazadas" | "clave" | "detalle" | "metricas";
 
@@ -26,6 +27,8 @@ export function App() {
   const [view, setView] = useState<View>("resultados");
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "doubts" | "rejected">("all");
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   // Al cargar, entra al lote más reciente en vez de dejar la pantalla vacía.
   useEffect(() => {
@@ -49,6 +52,19 @@ export function App() {
 
   function refresh() {
     detail.reload();
+  }
+
+  async function restoreBackup(file: File | null) {
+    if (!file) return;
+    setRestoreError(null);
+    try {
+      const b = await importBatchBackup(file, repo);
+      batches.reload();
+      setBatchId(b.id);
+      setView("resultados");
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   return (
@@ -133,10 +149,21 @@ export function App() {
               ))}
             </select>
             <button className="btn btn--sm" onClick={() => void newBatch()}>{UI.common.newBatch}</button>
+            <button className="btn btn--sm" onClick={() => restoreInputRef.current?.click()}>
+              {UI.common.restoreBackup}
+            </button>
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => { const f = e.target.files?.[0] ?? null; void restoreBackup(f); e.target.value = ""; }}
+            />
           </div>
         </header>
 
         <section className="view">
+          {restoreError && <Callout tone="warn"><strong>{UI.common.error}.</strong> {restoreError}</Callout>}
           {!batchId && !batches.loading && <Empty>{UI.common.noBatch}</Empty>}
           {detail.loading && <Empty>{UI.common.loading}</Empty>}
           {detail.error && <Empty>{detail.error}</Empty>}

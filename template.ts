@@ -321,7 +321,12 @@ export function validateTemplate(t: Template): string[] {
 
 // ─────────────────────────────────────────────────────────────
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// `typeof process` primero, y no directamente process.argv: este archivo
+// también se empaqueta para el navegador (el motor corre client-side en un
+// Web Worker), donde `process` no existe y evaluarlo aquí lanzaba
+// "ReferenceError: process is not defined" al cargar el worker. El bloque
+// sigue funcionando igual al correr el archivo con tsx en Node.
+if (typeof process !== "undefined" && import.meta.url === `file://${process.argv[1]}`) {
   const t = buildTemplate(50);
   const errors = validateTemplate(t);
   const bubbles = t.groups.reduce((n, g) => n + g.bubbles.length, 0);

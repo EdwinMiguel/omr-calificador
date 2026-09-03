@@ -1,3 +1,5 @@
+@import "./fonts.css";
+
 /* ───────────────────────────────────────────────────────────
    Tokens. Paleta completa en :root (tema claro), redefinida
    solo a nivel de token para oscuro. Ningún color se declara

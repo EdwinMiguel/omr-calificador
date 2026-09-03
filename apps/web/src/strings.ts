@@ -89,7 +89,10 @@ export const UI = {
     lead: "Arrastra los archivos del escáner. Cada archivo se identifica por su huella digital: si una hoja ya se procesó, se reconoce y no se vuelve a calificar.",
     dropTitle: "Suelta aquí las hojas escaneadas",
     dropSub: "o haz clic para elegir archivos",
-    dropHint: "PDF de varias páginas · JPG · PNG · TIFF — se recomienda escáner a 200 DPI",
+    // TIFF ya no se anuncia: el motor corre en el navegador y ningún
+    // navegador sabe decodificar TIFF (ver grayscale.ts). Anunciarlo hacía
+    // que el profesor eligiera archivos que el sistema iba a rechazar.
+    dropHint: "PDF de varias páginas · JPG · PNG — se recomienda escáner a 200 DPI",
     working: "Leyendo hojas…",
     preparing: "Preparando…",
     progress: (done: number, total: number) => `${done} de ${total} hojas leídas`,
@@ -109,6 +112,8 @@ export const UI = {
     average: "Promedio del aula",
     empty: "Todavía no hay hojas en este lote.",
     noKey: "Falta la clave de respuestas: las hojas están leídas pero aún no calificadas.",
+    exportCsv: "Exportar notas (CSV)",
+    downloadBackup: "Descargar respaldo",
     columns: {
       code: "Código",
       state: "Estado",
@@ -252,6 +257,7 @@ export const UI = {
     review: "Revisar",
     resolve: "Resolver",
     newBatch: "Nuevo lote",
+    restoreBackup: "Restaurar respaldo",
     batchName: "Nombre del lote",
     createBatch: "Crear lote",
     noBatch: "Crea un lote para empezar a cargar hojas.",
