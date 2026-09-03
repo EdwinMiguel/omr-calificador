@@ -204,9 +204,52 @@ export interface LabeledFill {
  * las preguntas, así que la lectura del código sigue exactamente igual de
  * estricta que antes.
  */
+/**
+ * ── Recalibrado 2026-09-03: el piso estaba más alto de lo que la evidencia
+ *    pedía ─────────────────────────────────────────────────────────────────
+ *
+ * 0.55 → 0.45 y 0.10 → 0.08. El piso de rescate es
+ * `max(fracción × markLevel, noiseHigh + margen)`, y hasta ahora ambos
+ * términos se habían fijado sin poder medir contra qué. Ahora se puede: se
+ * fabrican preguntas GENUINAMENTE en blanco sobre las imágenes reales
+ * (trasplantando una burbuja sin marcar de la misma columna — ver la nota de
+ * BLANK_MARGIN_MAX) y se mide cuán alto llega el ganador de una pregunta
+ * vacía. Ese es el techo que el piso tiene que superar, y no había forma de
+ * conocerlo antes:
+ *
+ *   hoja escaneada .......... techo 0.062   piso que exigía 0.243
+ *   celular-172453 .......... techo 0.104   piso que exigía 0.180
+ *   celular-174156 .......... techo 0.118   piso que exigía 0.184
+ *
+ * En la tercera hoja quedaban 0.066 de aire sin usar, y ahí caían 25 marcas
+ * reales que iban a revisión sin necesidad.
+ *
+ * BARRIDO contra 900 preguntas genuinamente en blanco (60 variantes × 15) y
+ * las 300 preguntas con verdad conocida:
+ *
+ *   fracción  margen |  correctas/INCORRECTAS/revisión |  INVENTADAS
+ *     0.55     0.10  |         259 / 0 / 41           |      0
+ *     0.45     0.10  |         267 / 0 / 33           |      0
+ *     0.45     0.08  |         270 / 0 / 30           |      0   ← elegido
+ *     0.45     0.06  |         270 / 0 / 30           |      0
+ *     0.35     0.08  |         270 / 0 / 30           |      0
+ *
+ * Por debajo de 0.08 el margen sobre el ruido deja de aportar (manda el otro
+ * término) y solo se pierde protección en hojas sucias, donde noiseHigh es
+ * justamente lo que frena el rescate. Por eso 0.45/0.08 y no menos: es el
+ * punto donde los dos términos quedan parejos.
+ *
+ * LO QUE ESTO SIGUE SIN RESOLVER, a propósito: una marca que mide por debajo
+ * de BLANK_MAX no llega nunca a esta regla — la atrapa antes la guarda de
+ * blanco y va a revisión. En celular-174156 hay marcas reales de 0.133 con
+ * un ganador clarísimo, y aun así se mandan a revisar: el techo de una
+ * pregunta vacía en ESA hoja es 0.118, o sea 0.015 de diferencia. Ese margen
+ * no alcanza para auto-aceptar sin arriesgar inventar una respuesta en una
+ * pregunta que el alumno dejó vacía.
+ */
 const PROMOTE_MAX_SECOND_RATIO = 0.5;
-const PROMOTE_MIN_LEVEL_FRACTION = 0.55;
-const PROMOTE_NOISE_MARGIN = 0.10;
+const PROMOTE_MIN_LEVEL_FRACTION = 0.45;
+const PROMOTE_NOISE_MARGIN = 0.08;
 const PROMOTE_MIN_CONFIDENT_MARKS = 10;
 
 /** Lo que la hoja sabe de sí misma, para decidir sus propios casos límite. */

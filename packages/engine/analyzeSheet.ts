@@ -115,9 +115,14 @@ export interface SheetResult {
  * TERCERA hoja con verdad conocida (IMG_20260830_174156.jpg, marcas de
  * lápiz muy tenues).
  *
- * Los `measurements` guardados por una versión anterior están en otra
- * escala: comparables entre sí, NO comparables uno a uno con los de 0.3.x. */
-export const ENGINE_VERSION = "0.3.0";
+ * 0.3.0 → 0.3.1: baja el piso de la regla de rescate (classification.ts,
+ * PROMOTE_MIN_LEVEL_FRACTION y PROMOTE_NOISE_MARGIN). Solo cambia qué se
+ * resuelve y qué va a revisión; la ESCALA de `measurements` es la misma que
+ * en 0.3.0, así que esos números sí son comparables entre las dos.
+ *
+ * Los `measurements` de 0.2.x y anteriores están en otra escala: comparables
+ * entre sí, NO comparables uno a uno con los de 0.3.x. */
+export const ENGINE_VERSION = "0.3.1";
 
 /**
  * MEDIDO de forma indirecta, no contra una foto de papel genuinamente en

@@ -126,8 +126,12 @@ describe("classify — rescate con el contexto de la hoja", () => {
   });
 
   it("NO rescata una marca demasiado floja para lo que mide marcar en esta hoja", () => {
-    // Muy por debajo de la marca típica (0.40) aunque gane por lejos.
-    expect(classify(opts([0.17, 0.01, 0.0, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
+    // Muy por debajo de la marca típica de la hoja, aunque gane por lejos.
+    // Escrito como fracción de markLevel y no con un número fijo: el piso de
+    // rescate se recalibra con evidencia (ver PROMOTE_MIN_LEVEL_FRACTION) y
+    // el caso tiene que seguir significando "demasiado floja" después.
+    const demasiadoFloja = hojaLimpia.markLevel * 0.3;
+    expect(classify(opts([demasiadoFloja, 0.01, 0.0, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
   });
 
   it("NO rescata si la hoja no tiene suficientes marcas confiables de las que fiarse", () => {
