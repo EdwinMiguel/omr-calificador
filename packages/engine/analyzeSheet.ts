@@ -108,10 +108,16 @@ export interface SheetResult {
  * 0.1.0 → 0.2.0: las preguntas se normalizan contra la referencia de papel
  * de su propia fila (calibration.ts::normalizeWithinGroup) en vez de contra
  * la de vecindario, y BLANK exige que ninguna opción se despegue
- * (classification.ts::BLANK_MARGIN_MAX). Los `measurements` guardados por
- * versiones 0.1.x están en la escala anterior: comparables entre sí, NO
- * comparables uno a uno con los de 0.2.x. */
-export const ENGINE_VERSION = "0.2.0";
+ * (classification.ts::BLANK_MARGIN_MAX).
+ *
+ * 0.2.0 → 0.3.0: el radio de búsqueda de fillRatioNearby baja de ±15 a ±8
+ * px y BLANK_MARGIN_MAX de 0.06 a 0.02, ambos recalibrados contra una
+ * TERCERA hoja con verdad conocida (IMG_20260830_174156.jpg, marcas de
+ * lápiz muy tenues).
+ *
+ * Los `measurements` guardados por una versión anterior están en otra
+ * escala: comparables entre sí, NO comparables uno a uno con los de 0.3.x. */
+export const ENGINE_VERSION = "0.3.0";
 
 /**
  * MEDIDO de forma indirecta, no contra una foto de papel genuinamente en

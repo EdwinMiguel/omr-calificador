@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fillRatio, fillRatioNearby } from "./measurement.ts";
+import { fillRatio, fillRatioNearby, SEARCH_RADIUS_PX } from "./measurement.ts";
 import type { GrayImage } from "./types.ts";
 
 describe("fillRatio", () => {
@@ -50,26 +50,57 @@ describe("fillRatio", () => {
 });
 
 describe("fillRatioNearby", () => {
-  it("encuentra una marca real desplazada del ROI nominal — caso real medido (Día 9)", () => {
+  /** Marca cuadrada de 20x20 con su centro desplazado `d` px del centro
+   * nominal, sobre papel blanco. */
+  const conMarcaDesplazada = (d: number) => {
     const w = 200, h = 200;
     const data = new Uint8Array(w * h).fill(255);
-    // Marca real a 12px de donde el Template "espera" la burbuja — dentro
-    // del rango observado en fotos reales (8-15px).
-    for (let y = 92; y < 112; y++) for (let x = 92; x < 112; x++) data[y * w + x] = 20;
+    for (let y = 80 + d; y < 100 + d; y++) for (let x = 80 + d; x < 100 + d; x++) data[y * w + x] = 20;
+    return { img: { data, width: w, height: h } as GrayImage, roi: { x: 80, y: 80, w: 20, h: 20 } };
+  };
 
-    const img: GrayImage = { data, width: w, height: h };
-    const nominalRoi = { x: 80, y: 80, w: 20, h: 20 }; // centro nominal (90,90), la tinta está en (92-112)
-
-    expect(fillRatio(img, nominalRoi)).toBeLessThan(0.3); // el ROI exacto la pierde casi toda
-    // >0.7, no >0.9: el barrido en pasos de 2px no siempre cae en el
-    // desplazamiento óptimo exacto (12,12 es par, la grilla parte de -15
-    // impar) — lo que importa es que la encuentre, muy por encima del
-    // ROI sin corregir, no que la aciarte al píxel.
-    expect(fillRatioNearby(img, nominalRoi)).toBeGreaterThan(0.7);
+  it("encuentra una marca desplazada dentro del radio calibrado, que el ROI nominal pierde", () => {
+    // En el borde mismo de la ventana: es el caso más exigente que el radio
+    // calibrado sí tiene que cubrir. La mediana medida en fotos reales cae
+    // bastante por debajo (1 a 7 px, ver la nota de SEARCH_RADIUS_PX).
+    const { img, roi } = conMarcaDesplazada(SEARCH_RADIUS_PX);
+    expect(fillRatio(img, roi)).toBeLessThan(0.35);        // el ROI exacto la pierde casi toda
+    expect(fillRatioNearby(img, roi)).toBeGreaterThan(0.85); // la búsqueda la recupera entera
   });
 
-  it("no inventa una marca donde solo hay papel en blanco", () => {
-    const img: GrayImage = { data: new Uint8Array(200 * 200).fill(255), width: 200, height: 200 };
-    expect(fillRatioNearby(img, { x: 80, y: 80, w: 20, h: 20 })).toBeCloseTo(0, 5);
-  });
+  it(
+    "una marca desplazada MÁS que el radio queda medida a medias — es el " +
+    "lado que se paga del compromiso, y se paga a propósito",
+    () => {
+      // El radio no se elige por el desplazamiento máximo observado sino por
+      // la BRECHA de separación: ver la tabla en measurement.ts. Una marca
+      // así mide bajo y va a revisión (conservador), no se lee mal.
+      const { img, roi } = conMarcaDesplazada(SEARCH_RADIUS_PX + 4);
+      const medido = fillRatioNearby(img, roi);
+      expect(medido).toBeGreaterThan(fillRatio(img, roi)); // algo recupera
+      expect(medido).toBeLessThan(0.7);                    // pero no todo
+    }
+  );
+
+  it(
+    "REGRESIÓN: una ventana más grande infla una burbuja SIN marcar, que es " +
+    "por lo que el radio bajó de 15 a 8",
+    () => {
+      // La búsqueda se aplica igual a toda burbuja. En una vacía no hay pico
+      // que encontrar: el máximo solo alcanza la tinta impresa vecina y sube
+      // la lectura de una burbuja que debería leer ~0, comiéndose el margen
+      // de la marcada de su fila.
+      const w = 200, h = 200;
+      const data = new Uint8Array(w * h).fill(255);
+      // Estructura impresa (borde de tabla) 10 px por debajo del ROI
+      // nominal: fuera del alcance de ±8, dentro del de ±15.
+      for (let y = 110; y < 130; y++) for (let x = 60; x < 140; x++) data[y * w + x] = 20;
+      const img: GrayImage = { data, width: w, height: h };
+      const roi = { x: 80, y: 80, w: 20, h: 20 };
+
+      expect(fillRatio(img, roi)).toBeCloseTo(0, 3);            // vacía de verdad
+      expect(fillRatioNearby(img, roi, 8)).toBeCloseTo(0, 3);   // ±8 no la alcanza
+      expect(fillRatioNearby(img, roi, 15)).toBeGreaterThan(0.1); // ±15 sí: contaminada
+    }
+  );
 });

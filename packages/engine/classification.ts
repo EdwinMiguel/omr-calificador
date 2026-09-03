@@ -86,8 +86,45 @@ export const MARGIN_MIN = 0.08;
  * En esas 1.240 preguntas genuinamente en blanco, el margen entre la 1ª y
  * la 2ª opción llega como máximo a 0.093 y solo un 5-7% supera 0.06. En las
  * marcas reales que caían por debajo de BLANK_MAX, el margen mínimo fue
- * 0.118. 0.06 corta entre las dos poblaciones dejando margen a los dos
- * lados. CALIBRAR si cambia la calidad de foto esperada.
+ * 0.118.
+ *
+ * ── 0.06 → 0.02 (2026-09-03), con una TERCERA hoja con verdad ───────────
+ *
+ * Apareció el régimen que las dos primeras hojas no cubrían.
+ * IMG_20260830_174156.jpg tiene marcas de lápiz extremadamente tenues: la
+ * más floja mide 0.008 de fillRatio crudo por encima del papel de su propia
+ * fila, unos 2 niveles de gris sobre 255. Con 0.06, OCHO preguntas con
+ * marca real (Q32-Q39) se auto-aceptaban como "sin contestar" — ocho notas
+ * mal calculadas en silencio sobre una sola hoja.
+ *
+ * Esa hoja además demuestra el límite duro de este estadístico: su brecha
+ * de separación es NEGATIVA a cualquier radio de búsqueda (-0.037 en el
+ * mejor caso), o sea que la peor marca verdadera mide por debajo de la
+ * mejor no-marca verdadera. Ningún umbral sobre fillRatio las separa. Por
+ * eso la respuesta correcta no es "afinar el corte" sino "no auto-aceptar
+ * ahí": exactamente lo que hace esta guarda.
+ *
+ * Bajar el margen solo puede mover BLANK → revisión, nunca inventar una
+ * respuesta, así que la única contrapartida es cola de revisión. Barrido
+ * sobre las TRES hojas con verdad (300 preguntas), con radio de búsqueda
+ * ±8 (ver measurement.ts):
+ *
+ *   G      correctas   INCORRECTAS   a revisión
+ *   0.06      264           7            29
+ *   0.04      264           6            30
+ *   0.03      264           5            31
+ *   0.02      264           0            36     ← única con la barrera §15
+ *   0.015     264           0            36
+ *
+ * COSTE, sobre 900 preguntas genuinamente en blanco fabricadas con el
+ * trasplante descrito arriba: pasan a revisión el 2% con G=0.06 y el 37%
+ * con G=0.02. Suena caro, pero se paga SOLO en preguntas sin contestar, y
+ * en el conjunto se compensa: sobre las 12 hojas del dataset (1200
+ * preguntas) la cola total de revisión pasa de 368 a 372 — cuatro más — y
+ * las respuestas auto-aceptadas suben 83, porque el radio ±8 resuelve más
+ * de lo que esta guarda manda a revisar.
+ *
+ * CALIBRAR si cambia la calidad de foto esperada.
  *
  * RESULTADO del banco (notas mal calculadas y auto-aceptadas, sobre 4.000
  * preguntas por escenario; α=0.8 modela un lápiz más flojo):
@@ -110,7 +147,7 @@ export const MARGIN_MIN = 0.08;
  * noiseHigh > BLANK_MAX), y esas hojas no tienen verdad conocida con la que
  * comprobar que apagarla sea seguro. §15: se prefiere la cola de revisión.
  */
-export const BLANK_MARGIN_MAX = 0.06;
+export const BLANK_MARGIN_MAX = 0.02;
 
 export interface LabeledFill {
   label: string;

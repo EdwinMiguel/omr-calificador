@@ -5,6 +5,17 @@ const opts = (values: number[]): { label: string; normalized: number }[] =>
   values.map((v, i) => ({ label: "ABCDE"[i]!, normalized: v }));
 
 /**
+ * Una pregunta genuinamente sin contestar: cinco opciones dentro del ruido,
+ * SIN que ninguna se despegue. Escrita relativa a BLANK_MARGIN_MAX y no con
+ * números fijos, por la misma razón que el resto del archivo: si se recalibra
+ * el umbral, el caso tiene que seguir significando lo mismo.
+ */
+const sinGanador = () => {
+  const r = BLANK_MARGIN_MAX * 0.4;
+  return opts([r * 0.5, r, r * 0.2, r * 0.7, 0]);
+};
+
+/**
  * Los casos se expresan RELATIVOS a los umbrales, no con números fijos.
  *
  * Antes estaban escritos con valores pegados a MARK_MIN=0.25 ("0.20 está en
@@ -19,8 +30,8 @@ describe("classify — los 7 casos límite del plan (Día 9)", () => {
     expect(classify(opts([0.05, 0.9, 0.03, 0.02, 0.04]))).toEqual({ kind: "ANSWERED", option: "B" });
   });
 
-  it("blanco: todas cerca de 0", () => {
-    expect(classify(opts([0.02, 0.05, 0.01, 0.03, 0.0]))).toEqual({ kind: "BLANK" });
+  it("blanco: todas cerca de 0 y ninguna despegada de las demás", () => {
+    expect(classify(sinGanador())).toEqual({ kind: "BLANK" });
   });
 
   it("doble: dos burbujas claramente marcadas", () => {
@@ -128,7 +139,7 @@ describe("classify — rescate con el contexto de la hoja", () => {
   });
 
   it("no toca lo que ya se decidía: en blanco sigue en blanco, marca clara sigue clara", () => {
-    expect(classify(opts([0.02, 0.05, 0.01, 0.03, 0.0]), hojaLimpia).kind).toBe("BLANK");
+    expect(classify(sinGanador(), hojaLimpia).kind).toBe("BLANK");
     expect(classify(opts([0.05, 0.9, 0.03, 0.02, 0.04]), hojaLimpia)).toEqual({ kind: "ANSWERED", option: "B" });
   });
 });
@@ -155,7 +166,7 @@ describe("classify — guarda de blanco", () => {
 
   it("una pregunta genuinamente en blanco sigue siendo BLANK: nadie se despega", () => {
     // Las cinco opciones dentro del ruido de la hoja, sin ganador.
-    expect(classify(opts([0.02, 0.05, 0.01, 0.03, 0.0])).kind).toBe("BLANK");
+    expect(classify(sinGanador()).kind).toBe("BLANK");
     // Justo por debajo del margen de la guarda: sigue siendo blanco.
     const casi = BLANK_MARGIN_MAX * 0.9;
     expect(classify(opts([casi, 0.0, 0.0, 0.0, 0.0])).kind).toBe("BLANK");

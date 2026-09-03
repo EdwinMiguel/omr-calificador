@@ -66,50 +66,65 @@ describe("analyzeSheet — alignedImage (necesaria para 'Ver hoja' en el navegad
 });
 
 /**
- * La barrera de PROMPT.md §15 medida donde importa: contra una verdad
- * dictada ANTES de procesar (§14), sobre una foto de celular real.
+ * La barrera de PROMPT.md §15 medida donde importa: contra verdades
+ * dictadas mirando el papel, no la pantalla (§14).
  *
- * Hasta 2026-09-03 esta hoja daba UNA respuesta auto-aceptada incorrecta:
- * Q95, donde el alumno marcó C, medía 0.147 contra BLANK_MAX=0.15 y salía
- * como "pregunta sin contestar" sin pasar por revisión. La referencia de
- * papel por fila (calibration.ts) y la guarda de blanco (classification.ts)
- * la corrigen por dos caminos independientes.
+ * Cada hoja de esta lista cubre un régimen distinto y ninguna sola alcanza:
  *
- * Nota sobre el conteo: un veredicto BLANK sobre una pregunta que SÍ tenía
- * marca cuenta como incorrecta, no como "a revisión". BLANK se auto-acepta
- * y baja la nota igual que una letra equivocada.
+ *   escaneada ....... escáner, marcas normales. Benigna: casi cualquier
+ *                     umbral la resuelve.
+ *   IMG_...172453 ... foto de celular, contraste bajo. Encontró el fallo
+ *                     de la referencia de papel por vecindario (Q95).
+ *   IMG_...174156 ... foto de celular con marcas de lápiz extremadamente
+ *                     tenues. Su brecha de separación es NEGATIVA: la peor
+ *                     marca verdadera mide por debajo de la mejor no-marca
+ *                     verdadera, así que ningún umbral las separa. Es la
+ *                     hoja que obliga a NO auto-aceptar en esa zona, y por
+ *                     eso la que sostiene BLANK_MARGIN_MAX.
+ *
+ * Un veredicto BLANK sobre una pregunta que SÍ tenía marca cuenta como
+ * incorrecta, no como "a revisión": BLANK se auto-acepta y baja la nota
+ * igual que una letra equivocada.
  */
 describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida", () => {
-  const foto = "dataset/fotos-marcadas/IMG_20260830_172453.jpg";
-  const verdad = "ground-truth/IMG_20260830_172453.json";
-  // dataset/ está en .gitignore: en un clon limpio la foto no existe y el
-  // test se salta en vez de fallar por una razón que no es del código.
-  const hayFixture = existsSync(foto) && existsSync(verdad);
+  const hojas = [
+    ["dataset/fotos-marcadas/hoja-resuelta-escaneada.jpg", "ground-truth/hoja-resuelta-escaneada.json"],
+    ["dataset/fotos-marcadas/IMG_20260830_172453.jpg", "ground-truth/IMG_20260830_172453.json"],
+    ["dataset/fotos-marcadas/IMG_20260830_174156.jpg", "ground-truth/IMG_20260830_174156.json"],
+  ] as const;
 
-  it.skipIf(!hayFixture)("ninguna respuesta auto-aceptada contradice la verdad de la hoja", async () => {
-    const t = buildOfficialTemplate(100);
-    const img = (await loadPages(foto))[0]!;
-    const outcome = await analyzeSheet(img, t, 200, {});
+  for (const [foto, verdad] of hojas) {
+    // dataset/ está en .gitignore: en un clon limpio la foto no existe y el
+    // test se salta en vez de fallar por una razón que no es del código.
+    const hayFixture = existsSync(foto) && existsSync(verdad);
+    const nombre = foto.split("/").pop()!;
 
-    const marks = (JSON.parse(readFileSync(verdad, "utf8")) as { marks: Record<string, string | null> }).marks;
+    it.skipIf(!hayFixture)(`${nombre}: ninguna respuesta auto-aceptada contradice la verdad`, async () => {
+      const t = buildOfficialTemplate(100);
+      const img = (await loadPages(foto))[0]!;
+      const outcome = await analyzeSheet(img, t, 200, {});
 
-    // El código del alumno de esta hoja no se lee con confianza, así que la
-    // hoja se rechaza — pero sus 100 respuestas viajan en `partial` y son
-    // exactamente las que hay que auditar (ver PartialRead).
-    const questions =
-      outcome.kind === "processed" ? outcome.result.questions : outcome.partial?.questions;
-    expect(questions).toBeDefined();
+      const marks = (JSON.parse(readFileSync(verdad, "utf8")) as { marks: Record<string, string | null> }).marks;
 
-    const incorrectas: string[] = [];
-    for (const q of questions!) {
-      const esperada = marks[String(q.ordinal)] ?? null;
-      if (q.state.kind === "ANSWERED" && q.state.option !== esperada) {
-        incorrectas.push(`Q${q.ordinal}: leyó ${q.state.option}, el alumno marcó ${esperada}`);
+      // Estas hojas se rechazan por STUDENT_ID_UNREADABLE (el código no se
+      // lee con confianza — en 174156 la verdad confirma que la columna 6
+      // quedó literalmente sin rellenar). Sus 100 respuestas viajan igual en
+      // `partial` y son las que hay que auditar: ver PartialRead.
+      const questions =
+        outcome.kind === "processed" ? outcome.result.questions : outcome.partial?.questions;
+      expect(questions).toBeDefined();
+
+      const incorrectas: string[] = [];
+      for (const q of questions!) {
+        const esperada = marks[String(q.ordinal)] ?? null;
+        if (q.state.kind === "ANSWERED" && q.state.option !== esperada) {
+          incorrectas.push(`Q${q.ordinal}: leyó ${q.state.option}, el alumno marcó ${esperada}`);
+        }
+        if (q.state.kind === "BLANK" && esperada !== null) {
+          incorrectas.push(`Q${q.ordinal}: leyó BLANCO, el alumno marcó ${esperada}`);
+        }
       }
-      if (q.state.kind === "BLANK" && esperada !== null) {
-        incorrectas.push(`Q${q.ordinal}: leyó BLANCO, el alumno marcó ${esperada}`);
-      }
-    }
-    expect(incorrectas).toEqual([]);
-  });
+      expect(incorrectas).toEqual([]);
+    });
+  }
 });
