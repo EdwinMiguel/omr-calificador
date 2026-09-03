@@ -107,9 +107,10 @@ export interface SheetResult {
  *
  * 0.1.0 → 0.2.0: las preguntas se normalizan contra la referencia de papel
  * de su propia fila (calibration.ts::normalizeWithinGroup) en vez de contra
- * la de vecindario. Los `measurements` guardados por versiones 0.1.x están
- * en la escala anterior: comparables entre sí, NO comparables uno a uno con
- * los de 0.2.x. */
+ * la de vecindario, y BLANK exige que ninguna opción se despegue
+ * (classification.ts::BLANK_MARGIN_MAX). Los `measurements` guardados por
+ * versiones 0.1.x están en la escala anterior: comparables entre sí, NO
+ * comparables uno a uno con los de 0.2.x. */
 export const ENGINE_VERSION = "0.2.0";
 
 /**

@@ -48,6 +48,70 @@ export const BLANK_MAX = 0.15;
 export const MARK_MIN = 0.25;
 export const MARGIN_MIN = 0.08;
 
+/**
+ * ── Guarda de blanco ─────────────────────────────────────────────────────
+ *
+ * PROBLEMA MEDIDO, y es estructural: BLANK es un veredicto que se
+ * AUTO-ACEPTA —la pregunta cuenta como no contestada y nadie la revisa—
+ * pero era el único que no exigía ninguna prueba de margen. Dos preguntas
+ * muy distintas recibían la misma respuesta:
+ *
+ *     las cinco opciones miden ≈0        → nadie marcó nada
+ *     una mide 0.147 y las otras ≈0      → alguien marcó, flojo
+ *
+ * El segundo caso es real: Q95 de la foto de celular anotada
+ * (ground-truth/IMG_20260830_172453.json, verdad dictada antes de
+ * procesar). El alumno marcó C; con la escala de entonces medía 0.147
+ * contra BLANK_MAX=0.15 y la hoja salía con una nota mal calculada, en
+ * silencio. AUTO_ACCEPTED_INCORRECT = 1, que es exactamente lo que
+ * PROMPT.md §15 prohíbe. Nótese que classify() ya tenía una ruta de rescate
+ * elaborada para la franja 0.15-0.25 y ninguna para lo que cae debajo.
+ *
+ * LA REGLA: para declarar BLANK no alcanza con que el máximo sea bajo;
+ * hace falta además que NINGUNA opción se despegue de las otras. Si una se
+ * despega, la pregunta va a revisión. Es estrictamente conservadora — solo
+ * puede mover BLANK → AMBIGUOUS, nunca producir una respuesta — así que por
+ * construcción no puede introducir un error nuevo, solo cola de revisión.
+ *
+ * DE DÓNDE SALE 0.06. Se fabricaron preguntas genuinamente en blanco sobre
+ * las imágenes reales: para cada marca verdadera se trasplanta el bloque de
+ * una burbuja que el alumno NO marcó, de la misma columna y a pocas filas
+ * (misma x exacta ⇒ mismo anillo impreso, misma etiqueta, casi la misma
+ * luz), mezclando `nuevo = donante + α·(original − donante)`. Con α=0 la
+ * pregunta queda vacía con papel, anillo y sombreado REALES; la verdad no
+ * cambia, así que toda respuesta perdida es culpa de la atenuación y toda
+ * inventada es un fallo de la regla. 40 semillas × 15 preguntas borradas ×
+ * 2 hojas × 2 niveles de α = 16.000 preguntas evaluadas.
+ *
+ * En esas 1.240 preguntas genuinamente en blanco, el margen entre la 1ª y
+ * la 2ª opción llega como máximo a 0.093 y solo un 5-7% supera 0.06. En las
+ * marcas reales que caían por debajo de BLANK_MAX, el margen mínimo fue
+ * 0.118. 0.06 corta entre las dos poblaciones dejando margen a los dos
+ * lados. CALIBRAR si cambia la calidad de foto esperada.
+ *
+ * RESULTADO del banco (notas mal calculadas y auto-aceptadas, sobre 4.000
+ * preguntas por escenario; α=0.8 modela un lápiz más flojo):
+ *
+ *                                    escaneada        celular
+ *                                   α=1    α=0.8    α=1    α=0.8
+ *   antes (vecindario, sin guarda)    0      0       19      67
+ *   referencia de fila, sin guarda    0      0        0      31
+ *   referencia de fila + esta guarda  0      0        0       0
+ *
+ * COSTO: sobre las 12 hojas reales mueve 171 preguntas de BLANK a revisión,
+ * pero la cuenta se concentra en las hojas medio vacías del dataset de
+ * pruebas (marcada-01: 31, marcada-02: 32). En las tres hojas que parecen
+ * un examen completo de verdad cuesta 0, 0 y 2 preguntas.
+ *
+ * SE PROBÓ UNA VARIANTE ADAPTATIVA y se descartó: exigir además que el
+ * ganador supere el noiseHigh de la hoja baja la cola de revisión del banco
+ * de 47 a 33 y de 70 a 53, y cuesta 0 en las hojas sucias — pero se apaga
+ * sola justo en las hojas donde el veredicto BLANK es MENOS fiable (ahí
+ * noiseHigh > BLANK_MAX), y esas hojas no tienen verdad conocida con la que
+ * comprobar que apagarla sea seguro. §15: se prefiere la cola de revisión.
+ */
+export const BLANK_MARGIN_MAX = 0.06;
+
 export interface LabeledFill {
   label: string;
   normalized: number;
@@ -179,7 +243,16 @@ function classifyByMargin(sorted: LabeledFill[], sheet?: SheetMarkContext): Clas
   const top = sorted[0]!;
   const second = sorted[1];
 
-  if (top.normalized < BLANK_MAX) return { kind: "BLANK" };
+  if (top.normalized < BLANK_MAX) {
+    // "Nadie marcó nada" exige que nadie se despegue. Si una opción se
+    // despega de las demás hay algo escrito ahí, aunque sea demasiado flojo
+    // para leerlo: eso es duda, no una pregunta sin contestar. Ver la nota
+    // de BLANK_MARGIN_MAX.
+    if (second && top.normalized - second.normalized >= BLANK_MARGIN_MAX) {
+      return { kind: "AMBIGUOUS" };
+    }
+    return { kind: "BLANK" };
+  }
   if (top.normalized < MARK_MIN) {
     // Zona de duda. Solo se rescata con el contexto de la hoja y si se
     // cumplen TODAS las condiciones — si no, sigue yendo a revisión igual
