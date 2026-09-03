@@ -2,6 +2,9 @@
   "name": "sistema-procesamiento-de-notas",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "generate:sheet": "tsx packages/pdf-generator/generateSheet.ts",
     "compose:official": "tsx packages/pdf-generator/composeOfficialSheet.ts",
