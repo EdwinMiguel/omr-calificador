@@ -70,6 +70,31 @@ describe("deriveThresholds", () => {
     expect(refLeft).toBeGreaterThan(refRight);
   });
 
+  it("rechaza una hoja con una ZONA sin contraste en vez de invertir la escala ahí", () => {
+    // REGRESIÓN de un bug real: normalize() divide por (blackRef - whiteRef).
+    // Con referencia local hay un denominador por burbuja, y si una zona está
+    // tan oscura que su papel mide como la tinta, el denominador se acerca a
+    // 0 (valores disparados) o se vuelve NEGATIVO, invirtiendo la escala: una
+    // burbuja vacía pasa a medir "más marcada" que la pintada. Medido sobre
+    // la hoja escaneada con sombra sintética: 7 respuestas auto-aceptadas
+    // INCORRECTAS, justo lo que §15 prohíbe.
+    const t = buildOfficialTemplate(100);
+    const canvasW = Math.round(mmToPx(t.page.widthMm, DPI));
+    const canvasH = Math.round(mmToPx(t.page.heightMm, DPI));
+    const img = makeUniform(canvasW, canvasH, 210); // papel normal
+
+    for (const patch of t.calibration) {
+      paintPatch(img, patch.rect.x, patch.rect.y, patch.rect.w, patch.rect.h, patch.kind === "black" ? 20 : 210);
+    }
+    // Sombra brutal sobre una FRANJA: el papel de esa zona queda tan oscuro
+    // como la tinta. El resto de la hoja sigue perfectamente legible, así
+    // que la guarda de contraste GLOBAL no se dispara — es exactamente el
+    // caso que la guarda global no cubría.
+    paintPatch(img, 20, 120, 55, 170, 22);
+
+    expect(() => deriveThresholds(img, t, DPI)).toThrow(/Zona de la hoja sin contraste/);
+  });
+
   it("rechaza una hoja sin contraste medible en vez de calibrar con ruido", () => {
     const t = buildOfficialTemplate(100);
     const canvasW = Math.round(mmToPx(t.page.widthMm, DPI));

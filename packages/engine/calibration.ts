@@ -76,12 +76,26 @@
  * que deje de ser "local" y se acerque de nuevo a la referencia global que
  * se quiere evitar.
  *
- * COSTO: medido en Node, calcular la referencia de las 570 burbujas de una
- * hoja completa (fuerza bruta, sin estructura espacial) toma ~59ms, contra
- * ~1047ms del análisis completo de la hoja (+5.6%). No se optimizó con un
- * índice espacial (§10, no antes de medir): con una sola plantilla de
- * producción y un total de burbujas acotado, la ganancia no justifica la
- * complejidad todavía.
+ * COSTO, medido en los dos entornos donde corre el motor:
+ *   Node ....... `analyzeSheet` pasó de ~1047ms a ~1137ms por hoja (+8.6%).
+ *   Navegador .. un PDF de 10 páginas pasó de 14.1s a 18.1s (+28%), que es
+ *                el número que importa porque ahí es donde corre de verdad.
+ *                La interfaz sigue sin bloquearse (hueco máximo entre
+ *                latidos de 50ms: 72ms, ninguno por encima de 100ms).
+ *
+ * Las referencias de las 570 posiciones se calculan UNA vez dentro de
+ * `deriveThresholds` y quedan en caché, así que consultarlas después durante
+ * la clasificación cuesta 0ms — sin esa caché el mismo trabajo se haría dos
+ * veces (una para verificar que ninguna zona sea ilegible, otra al
+ * normalizar cada burbuja).
+ *
+ * La búsqueda de vecinas sigue siendo por fuerza bruta, sin índice espacial
+ * (§10, no optimizar antes de medir): el grueso del costo son los ~325.000
+ * objetos temporales que se crean por hoja al ordenar por distancia. Si
+ * alguna vez molesta, la mejora evidente es reemplazar esos objetos por
+ * arreglos tipados y una selección parcial de las k menores en vez de un
+ * ordenamiento completo — no se hizo ahora para no meter una optimización
+ * riesgosa justo antes de poner el sistema en manos del cliente.
  */
 
 import type { GrayImage } from "./types.ts";
@@ -106,6 +120,14 @@ const WHITE_NEIGHBORHOOD_FRACTION = 0.08;
 const MIN_NEIGHBORS = 20;
 const MAX_NEIGHBORS = 90;
 
+/**
+ * Separación mínima exigible entre la tinta y el papel para que una escala
+ * de grises signifique algo. Derivado de la evidencia real (Día 8): la foto
+ * más floja del dataset dio blackRef-whiteRef≈0.19; 0.05 deja margen amplio
+ * por debajo de eso y aun así descarta una referencia sin contraste medible.
+ */
+const MIN_CONTRAST = 0.05;
+
 function median(xs: number[]): number {
   const sorted = [...xs].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)]!;
@@ -123,11 +145,50 @@ interface BubbleSample {
  * cercanas. Por qué mediana y no promedio: la misma razón que en la
  * referencia global de más abajo — robusta a que unas pocas de esas k
  * vecinas SÍ estén marcadas (respuestas reales), sin que las contaminen.
+ *
+ * ── ZONA ILEGIBLE = RECHAZO (bug real, encontrado, reproducido y medido) ──
+ *
+ * `normalize()` divide por (blackRef - whiteRef). Con una referencia ÚNICA
+ * por hoja ese denominador estaba protegido por la guarda MIN_CONTRAST de
+ * `deriveThresholds()`. Con una referencia LOCAL hay uno distinto por
+ * burbuja, y la guarda global no dice nada sobre ellos.
+ *
+ * MEDIDO sobre la hoja escaneada (verdad conocida de 100 respuestas) con
+ * una sombra circular localizada cada vez más oscura: con el papel de esa
+ * zona al 22% de su brillo el denominador local bajaba a 0.002, y al 15% se
+ * volvía NEGATIVO en 64 burbujas. Con denominador negativo la escala se
+ * INVIERTE —una burbuja vacía mide "más marcada" que la pintada— y salían
+ * 7 respuestas AUTO-ACEPTADAS INCORRECTAS, que es exactamente lo que
+ * PROMPT.md §15 prohíbe.
+ *
+ * Se probaron cuatro salidas contra esa misma verdad conocida, con la
+ * sombra creciendo hasta dejar el papel al 8% de su brillo:
+ *
+ *   global pura (lo de antes) ..... 2 incorrectas en el caso más oscuro
+ *   respaldo a la global .......... 4 y 3 incorrectas en casos intermedios
+ *   recortar en blackRef-0.05 ..... 4 y 6 incorrectas en los más oscuros
+ *   RECHAZAR la hoja .............. 0 incorrectas en TODOS los casos
+ *
+ * Gana rechazar, y no por poco: es la única que nunca inventa una nota.
+ * Nótese que la referencia global —el código anterior a esta mejora—
+ * TAMPOCO era segura acá; este rechazo cierra un agujero que ya existía.
+ *
+ * Que una zona lea el papel casi tan oscuro como la tinta significa que ahí
+ * no hay información que extraer: no es que el umbral esté mal puesto, es
+ * que marca y papel son indistinguibles. Se rechaza la hoja entera con
+ * CALIBRATION_FAILED (el llamador ya traduce esto a "vuelve a
+ * fotografiarla"), en vez de calificar media hoja y adivinar la otra media.
+ *
+ * En las 10 fotos reales del dataset el margen mínimo medido fue 0.136,
+ * casi 3× por encima del umbral — o sea que esto no rechaza nada de lo que
+ * hoy funciona; solo ataja el caso patológico.
  */
-function buildWhiteRefAt(samples: BubbleSample[]): (xMm: number, yMm: number) => number {
+function buildWhiteRefAt(
+  samples: BubbleSample[], blackRef: number
+): (xMm: number, yMm: number) => number {
   const k = Math.min(MAX_NEIGHBORS, Math.max(MIN_NEIGHBORS, Math.round(samples.length * WHITE_NEIGHBORHOOD_FRACTION)));
 
-  return (xMm: number, yMm: number): number => {
+  const localMedianAt = (xMm: number, yMm: number): number => {
     const nearest = samples
       .map((s) => ({ d2: (s.xMm - xMm) ** 2 + (s.yMm - yMm) ** 2, raw: s.raw }))
       .sort((a, b) => a.d2 - b.d2)
@@ -135,6 +196,28 @@ function buildWhiteRefAt(samples: BubbleSample[]): (xMm: number, yMm: number) =>
       .map((s) => s.raw);
     return median(nearest);
   };
+
+  // Se calcula la referencia de TODAS las posiciones del pool una sola vez:
+  // sirve para verificar que ninguna zona sea ilegible y, de paso, evita
+  // recalcular lo mismo después (son exactamente las posiciones que va a
+  // consultar la clasificación). Sin esto el trabajo se haría dos veces.
+  const cache = new Map<string, number>();
+  const key = (x: number, y: number): string => `${x}:${y}`;
+  const maxUsableWhite = blackRef - MIN_CONTRAST;
+
+  for (const s of samples) {
+    const ref = localMedianAt(s.xMm, s.yMm);
+    if (ref > maxUsableWhite) {
+      throw new Error(
+        `Zona de la hoja sin contraste utilizable: alrededor de (${s.xMm.toFixed(0)}mm, ` +
+        `${s.yMm.toFixed(0)}mm) el papel mide ${ref.toFixed(3)} y la tinta ${blackRef.toFixed(3)} — ` +
+        `ahí no se distingue una marca del papel`
+      );
+    }
+    cache.set(key(s.xMm, s.yMm), ref);
+  }
+
+  return (xMm, yMm) => cache.get(key(xMm, yMm)) ?? localMedianAt(xMm, yMm);
 }
 
 /**
@@ -191,20 +274,20 @@ export function deriveThresholds(normalized: GrayImage, template: Template, dpi:
       raw: fillRatioNearby(normalized, bubbleRoi(b, template, dpi)),
     }))
   );
+  if (samples.length === 0) {
+    // Sin burbujas no hay de dónde sacar la referencia de papel. Se corta
+    // acá con un mensaje claro en vez de dejar que una mediana de lista
+    // vacía se propague como NaN y salgan clasificaciones sin sentido.
+    throw new Error("El Template no tiene burbujas: no hay de dónde derivar la referencia de papel");
+  }
 
   /**
-   * MIN_CONTRAST: derivado de la evidencia real (Día 8), no arbitrario —
-   * la foto más floja del dataset real dio blackRef-whiteRef≈0.19; 0.05
-   * deja margen amplio por debajo de eso y aun así rechaza una hoja
-   * genuinamente sin contraste medible. CALIBRAR si aparecen fotos con
-   * contraste real pero bajo.
-   *
-   * Se comprueba contra la referencia GLOBAL (mediana de todas las
-   * burbujas), no una local: esto decide si la hoja ENTERA es ilegible, no
-   * si una zona lo es — para eso está la referencia por vecindario.
+   * La guarda de contraste se comprueba contra la referencia GLOBAL
+   * (mediana de todas las burbujas), no una local: esto decide si la hoja
+   * ENTERA es ilegible, no si una zona lo es — para eso está la referencia
+   * por vecindario, con su propio piso de seguridad (ver buildWhiteRefAt).
    */
   const globalWhite = median(samples.map((s) => s.raw));
-  const MIN_CONTRAST = 0.05;
   if (blackRef - globalWhite < MIN_CONTRAST) {
     throw new Error(
       `Contraste insuficiente entre parches negro (${blackRef.toFixed(3)}) y blanco ` +
@@ -212,7 +295,7 @@ export function deriveThresholds(normalized: GrayImage, template: Template, dpi:
     );
   }
 
-  return { blackRef, whiteRefAt: buildWhiteRefAt(samples) };
+  return { blackRef, whiteRefAt: buildWhiteRefAt(samples, blackRef) };
 }
 
 /** Reescala un fillRatio crudo a [0,1] relativo a ESTA hoja, en la posición
