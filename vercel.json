@@ -1,0 +1,6 @@
+{
+  "framework": null,
+  "installCommand": "npm install --include=dev",
+  "buildCommand": "npm run web:build",
+  "outputDirectory": "apps/web/dist"
+}
