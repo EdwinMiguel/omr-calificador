@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classify, BLANK_MAX, MARK_MIN, MARGIN_MIN } from "./classification.ts";
+import { classify, deriveSheetMarkContext, BLANK_MAX, MARK_MIN, MARGIN_MIN } from "./classification.ts";
 
 const opts = (values: number[]): { label: string; normalized: number }[] =>
   values.map((v, i) => ({ label: "ABCDE"[i]!, normalized: v }));
@@ -77,5 +77,58 @@ describe("classify — los 7 casos límite del plan (Día 9)", () => {
     // ganaría siempre: nada podría clasificarse nunca como respuesta.
     expect(BLANK_MAX).toBeLessThan(MARK_MIN);
     expect(MARGIN_MIN).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * El rescate de marcas reales que no llegan a MARK_MIN (caso Q97: marca de
+ * tinta normal pero con menos cobertura, que medía 0.236 contra un umbral de
+ * 0.25, con la segunda opción en 0.04 — o sea, sin ninguna duda sobre CUÁL
+ * marcó). Ver la nota extensa en classification.ts.
+ */
+describe("classify — rescate con el contexto de la hoja", () => {
+  /** Una hoja sana: marcas alrededor de 0.40, ruido bajo. */
+  const hojaLimpia = deriveSheetMarkContext([
+    ...Array.from({ length: 30 }, () => opts([0.40, 0.03, 0.02, 0.01, 0.04])),
+  ]);
+
+  it("rescata el caso Q97: ganador inequívoco, parecido a una marca de esta hoja", () => {
+    const casoQ97 = opts([0.236, 0.04, 0.005, -0.001, -0.024]);
+    // Sin contexto —como se clasifica el código del alumno— sigue dudosa.
+    expect(classify(casoQ97).kind).toBe("AMBIGUOUS");
+    // Con el contexto de la hoja, se resuelve.
+    expect(classify(casoQ97, hojaLimpia)).toEqual({ kind: "ANSWERED", option: "A" });
+  });
+
+  it("NO inventa respuesta en una pregunta en blanco con ruido: el piso sube con el ruido de la hoja", () => {
+    // Misma hoja pero sucia: sus propias perdedoras llegan alto, así que el
+    // piso se levanta solo y la misma medición ya no alcanza.
+    const hojaSucia = deriveSheetMarkContext([
+      ...Array.from({ length: 30 }, () => opts([0.40, 0.22, 0.19, 0.05, 0.03])),
+    ]);
+    expect(hojaSucia.noiseHigh).toBeGreaterThan(hojaLimpia.noiseHigh);
+    expect(classify(opts([0.236, 0.04, 0.005, 0.0, 0.0]), hojaSucia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata si la segunda opción está cerca: ahí la duda es CUÁL, no si marcó", () => {
+    expect(classify(opts([0.236, 0.20, 0.01, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata una marca demasiado floja para lo que mide marcar en esta hoja", () => {
+    // Muy por debajo de la marca típica (0.40) aunque gane por lejos.
+    expect(classify(opts([0.17, 0.01, 0.0, 0.0, 0.0]), hojaLimpia).kind).toBe("AMBIGUOUS");
+  });
+
+  it("NO rescata si la hoja no tiene suficientes marcas confiables de las que fiarse", () => {
+    const hojaPobre = deriveSheetMarkContext([
+      ...Array.from({ length: 3 }, () => opts([0.40, 0.03, 0.02, 0.01, 0.04])),
+    ]);
+    expect(hojaPobre.confidentMarks).toBeLessThan(10);
+    expect(classify(opts([0.236, 0.04, 0.005, 0.0, 0.0]), hojaPobre).kind).toBe("AMBIGUOUS");
+  });
+
+  it("no toca lo que ya se decidía: en blanco sigue en blanco, marca clara sigue clara", () => {
+    expect(classify(opts([0.02, 0.05, 0.01, 0.03, 0.0]), hojaLimpia).kind).toBe("BLANK");
+    expect(classify(opts([0.05, 0.9, 0.03, 0.02, 0.04]), hojaLimpia)).toEqual({ kind: "ANSWERED", option: "B" });
   });
 });

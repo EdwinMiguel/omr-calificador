@@ -12,7 +12,7 @@ import { bubbleRoi } from "../../template.ts";
 import { analyzeGeometry } from "./geometry.ts";
 import { deriveThresholds, normalize } from "./calibration.ts";
 import { fillRatioNearby } from "./measurement.ts";
-import { classify, type LabeledFill, type ClassificationState } from "./classification.ts";
+import { classify, deriveSheetMarkContext, type LabeledFill, type ClassificationState } from "./classification.ts";
 import { decodeDigitGrid } from "./identification.ts";
 import { gradeQuestions, computeScore, type AnswerKey, type QuestionResult, type Score } from "./scoring.ts";
 
@@ -157,15 +157,28 @@ export async function analyzeSheet(
   const digitGroups = template.groups.filter((g) => g.kind === "digit");
   const id = decodeDigitGrid(digitGroups, fillFn);
 
+  // Se mide TODO primero y se clasifica después, en dos pasadas: la segunda
+  // necesita saber cuánto mide una marca —y cuánto mide el ruido— en ESTA
+  // hoja, y eso solo se sabe una vez medidas todas las preguntas. Ver
+  // deriveSheetMarkContext() en classification.ts.
   const questionGroups = template.groups.filter((g) => g.kind === "question");
   const measurements: Measurements = {};
-  const states = questionGroups.map((g) => {
+  const measuredQuestions = questionGroups.map((g) => {
     const fills = fillFn(g);
     measurements[g.ordinal] = Object.fromEntries(
       fills.map((f) => [f.label, Math.round(f.normalized * 1000) / 1000])
     );
-    return { ordinal: g.ordinal, state: classify(fills) };
+    return { ordinal: g.ordinal, fills };
   });
+
+  // El contexto se pasa SOLO a las preguntas. `decodeDigitGrid` de más
+  // arriba clasifica el código sin él a propósito: una respuesta mal leída
+  // afecta una nota, un dígito mal leído le cambia el dueño a la hoja.
+  const sheetContext = deriveSheetMarkContext(measuredQuestions.map((q) => q.fills));
+  const states = measuredQuestions.map(({ ordinal, fills }) => ({
+    ordinal,
+    state: classify(fills, sheetContext),
+  }));
   const questions = gradeQuestions(states, answerKey);
 
   // PROMPT.md §13.8 (mismo principio, aplicado al ID): una hoja cuyo
