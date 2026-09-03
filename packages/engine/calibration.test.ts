@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveThresholds, normalize } from "./calibration.ts";
+import { deriveThresholds, normalize, normalizeWithinGroup } from "./calibration.ts";
 import { buildOfficialTemplate } from "../pdf-generator/officialTemplate.ts";
 import type { GrayImage } from "./types.ts";
 import { mmToPx } from "../../template.ts";
@@ -118,5 +118,64 @@ describe("normalize", () => {
     const cal = { blackRef: 1, whiteRefAt: (x: number) => (x < 50 ? 0.4 : 0.2) };
     expect(normalize(0.4, cal, 10, 0)).toBeCloseTo(0, 5); // a la izquierda, blanco=0.4
     expect(normalize(0.2, cal, 90, 0)).toBeCloseTo(0, 5); // a la derecha, blanco=0.2
+  });
+});
+
+describe("normalizeWithinGroup", () => {
+  /** Referencia de vecindario deliberadamente EQUIVOCADA (0.5), para que se
+   * note cuál de las dos se está usando en cada caso. */
+  const cal = { blackRef: 1, whiteRefAt: () => 0.5 };
+  const at = (raw: number) => ({ raw, xMm: 100, yMm: 100 });
+
+  it("usa la mediana de las OTRAS opciones del grupo, no la referencia de vecindario", () => {
+    // Una marca (0.70) entre cuatro papeles (0.30). La referencia correcta
+    // para esta fila es 0.30, no el 0.5 que dice el vecindario.
+    const r = normalizeWithinGroup([0.30, 0.30, 0.70, 0.30, 0.30].map(at), cal);
+    expect(r[2]).toBeCloseTo((0.70 - 0.30) / (1 - 0.30), 4);
+    expect(r[2]).not.toBeCloseTo((0.70 - 0.5) / (1 - 0.5), 2);
+    // Y las cuatro no marcadas quedan en 0: son exactamente su propia
+    // referencia de papel.
+    for (const i of [0, 1, 3, 4]) expect(r[i]).toBeCloseTo(0, 5);
+  });
+
+  it("excluye la propia burbuja: una marca no se auto-atenúa subiendo su referencia", () => {
+    // Dos marcadas y dos no, en un grupo de 4. Si la referencia de una
+    // marca se calculara INCLUYÉNDOLA, la mediana caería sobre 0.9 y la
+    // marca mediría 0 — se borraría a sí misma.
+    const r = normalizeWithinGroup([0.9, 0.9, 0.3, 0.3].map(at), cal);
+    expect(r[0]).toBeCloseTo((0.9 - 0.3) / (1 - 0.3), 4);
+    expect(r[0]).toBeGreaterThan(0.5);
+  });
+
+  it("vuelve a la referencia de vecindario si el papel del grupo mide casi como la tinta", () => {
+    // Denominador de fila = 0.5 - 0.48 = 0.02, por debajo del contraste
+    // mínimo exigible: dividir por eso dispara cualquier diferencia de ruido
+    // a valores enormes. Se usa la de vecindario, que la guarda de zona de
+    // deriveThresholds ya validó.
+    const sombra = { blackRef: 0.5, whiteRefAt: () => 0.2 };
+    const r = normalizeWithinGroup([0.48, 0.48, 0.49, 0.48, 0.48].map(at), sombra);
+    expect(r[2]).toBeCloseTo((0.49 - 0.2) / (0.5 - 0.2), 4);
+  });
+
+  it("grupos de menos de 4 opciones usan la referencia de vecindario", () => {
+    // Con dos o tres opciones, "la mediana de las otras" es una muestra
+    // suelta, no una referencia. Ninguna plantilla del proyecto llega acá.
+    const r = normalizeWithinGroup([0.30, 0.70].map(at), cal);
+    expect(r[1]).toBeCloseTo((0.70 - 0.5) / (1 - 0.5), 4);
+  });
+
+  it("REGRESIÓN: resuelve un sombreado que varía DENTRO de la fila, invisible para el vecindario", () => {
+    // Medido en Q100 de la foto anotada: las cuatro opciones NO marcadas
+    // subían en rampa de izquierda a derecha mientras la referencia de
+    // vecindario les daba a las cinco el mismo valor de papel. Con la rampa,
+    // la última opción sin marcar se acercaba peligrosamente a la marcada.
+    const rampa = [0.42, 0.43, 0.44, 0.45, 0.46];
+    const marcada = 0.52;
+    const conVecindario = rampa.map((v) => (v - 0.42) / (1 - 0.42));
+    const brechaVecindario = (marcada - 0.42) / (1 - 0.42) - Math.max(...conVecindario);
+
+    const r = normalizeWithinGroup([...rampa.slice(0, 4), marcada].map(at), cal);
+    const brechaFila = r[4]! - Math.max(...r.slice(0, 4));
+    expect(brechaFila).toBeGreaterThan(brechaVecindario);
   });
 });

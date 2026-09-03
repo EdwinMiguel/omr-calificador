@@ -307,3 +307,90 @@ export function normalize(raw: number, cal: SheetCalibration, xMm: number, yMm: 
   const white = cal.whiteRefAt(xMm, yMm);
   return (raw - white) / (cal.blackRef - white);
 }
+
+/**
+ * ── Referencia de papel a escala de GRUPO ────────────────────────────────
+ *
+ * PROBLEMA MEDIDO (2026-09-03, sobre las DOS hojas con verdad conocida: la
+ * escaneada y una foto de celular con las 100 respuestas dictadas antes de
+ * procesar). La brecha de separación —peor marca verdadera menos mejor
+ * burbuja verdaderamente vacía— valía 0.157 en la escaneada pero 0.018 en
+ * la foto. Al abrirla por columna de preguntas apareció que el problema no
+ * estaba repartido por la hoja:
+ *
+ *     columna 1 (Q1-25) ..... 0.215      columna 3 (Q51-75) .... 0.111
+ *     columna 2 (Q26-50) .... 0.144      columna 4 (Q76-100) ... 0.018
+ *
+ * Tres cuartas partes de la hoja estaban sanas. Un residuo concentrado en
+ * una zona no es ruido de sensor: es un sombreado que varía DENTRO de la
+ * fila de una pregunta. La referencia por vecindario de arriba mira ~46
+ * burbujas (8% de 570), que cubren media hoja de ancho — un gradiente de
+ * 20 mm le queda por debajo de la resolución. Se vio directo en Q96-100 de
+ * esa foto: las cuatro opciones NO marcadas de cada fila subían en rampa de
+ * izquierda a derecha (B=0.044, C=0.078, D=0.155, E=0.183 en Q100), con la
+ * referencia local dándoles el mismo valor de papel a las cinco.
+ *
+ * Las otras opciones de la MISMA pregunta están a 5 mm, bajo la misma luz y
+ * sobre el mismo papel: son la referencia más fina que existe sin leer un
+ * solo píxel nuevo. Medido con ellas, la brecha del peor caso pasa de 0.018
+ * a 0.107 (×6), y la columna 4 de 0.018 a 0.115.
+ *
+ * POR QUÉ NO REEMPLAZA A LA REFERENCIA POR VECINDARIO: la de vecindario
+ * sigue siendo la que decide si una ZONA de la hoja es ilegible (ver
+ * buildWhiteRefAt) y la que normaliza el código del alumno. Las dos escalas
+ * responden preguntas distintas y ninguna sustituye a la otra.
+ *
+ * POR QUÉ SE EXCLUYE LA PROPIA BURBUJA (leave-one-out): si no, una marca
+ * fuerte subiría su propia referencia y se auto-atenuaría — justo la
+ * burbuja que más importa medir bien.
+ *
+ * POR QUÉ MEDIANA Y CUÁNDO SE ROMPE: con 5 opciones y 1 marcada, la mediana
+ * de las otras 4 es papel. Haría falta que 3 de las 5 estuvieran marcadas
+ * para que dejara de serlo — y esa pregunta ya es un caso de MULTIPLE, no
+ * una lectura normal. En una columna de 10 dígitos el margen es todavía
+ * mayor. Es el mismo argumento que sostiene la referencia por vecindario,
+ * aplicado a un vecindario más chico.
+ *
+ * VALIDACIÓN. Sobre las 12 hojas alineadas del dataset (1200 preguntas):
+ * CERO respuestas cambiaron de UNA LETRA A OTRA; 69 pasaron de pendiente a
+ * resuelta y 7 al revés. Es la misma firma conservadora que se le exigió a
+ * la calibración por vecindario (PROMPT.md §15: revisión manual antes que
+ * respuesta inventada), no una corrección arriesgada. Contra la verdad
+ * conocida corrige un error real: Q95 de la foto anotada, donde el alumno
+ * marcó C, medía 0.147 contra BLANK_MAX=0.15 y el motor la AUTO-ACEPTABA
+ * como pregunta sin contestar.
+ *
+ * COSTO: no lee ningún píxel nuevo, solo reordena cuatro números ya
+ * medidos. Node: 0.1 ms → 0.2 ms por hoja, contra ~112 ms de medición y
+ * ~205 ms de calibración.
+ *
+ * @param bubbles las burbujas del grupo, ya medidas en crudo, con su
+ * posición en mm (necesaria solo para el repliegue de abajo).
+ */
+export function normalizeWithinGroup(
+  bubbles: { raw: number; xMm: number; yMm: number }[], cal: SheetCalibration
+): number[] {
+  return bubbles.map((b, i) => {
+    // Con menos de 4 opciones, "la mediana de las otras" es una o dos
+    // muestras sueltas: no es una referencia, es una burbuja cualquiera.
+    // Ninguna plantilla del proyecto llega a ese caso (5 opciones, 10
+    // dígitos); la guarda está para que una futura no lo haga en silencio.
+    if (bubbles.length < 4) return normalize(b.raw, cal, b.xMm, b.yMm);
+
+    const groupWhite = median(bubbles.filter((_, j) => j !== i).map((o) => o.raw));
+
+    // Si el papel de esta fila mide casi como la tinta, la fila no da una
+    // referencia utilizable y se vuelve a la del vecindario. NO es el
+    // "respaldo a la global" que buildWhiteRefAt midió como inseguro: allí
+    // lo que fallaba era la zona entera, y respaldarse en algo más grueso
+    // tapaba una hoja ilegible. Acá la guarda de zona YA pasó (si no,
+    // deriveThresholds habría rechazado la hoja), así que lo que falló es
+    // una estimación de 4 muestras, y el caso realista que la rompe es una
+    // fila con 3+ opciones marcadas — que con la referencia de vecindario
+    // se resuelve sola como MULTIPLE. Sin alcanzar en el dataset actual: el
+    // mínimo medido en las 12 hojas fue 0.058, por encima de MIN_CONTRAST.
+    if (cal.blackRef - groupWhite < MIN_CONTRAST) return normalize(b.raw, cal, b.xMm, b.yMm);
+
+    return (b.raw - groupWhite) / (cal.blackRef - groupWhite);
+  });
+}
