@@ -241,6 +241,9 @@ p { margin: 0; }
   border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink);
   cursor: pointer; transition: background .13s ease, border-color .13s ease;
   display: inline-flex; align-items: center; gap: 7px;
+  /* .btn también se usa en <a> (descarga de la hoja oficial, Upload.tsx):
+   * sin esto el subrayado nativo del link se cuela sobre el estilo de botón. */
+  text-decoration: none;
 }
 .btn:hover { background: var(--surface-2); border-color: var(--ink-muted); }
 .btn--primary { background: var(--accent); border-color: var(--accent); color: #FFF; }
