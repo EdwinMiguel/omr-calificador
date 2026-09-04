@@ -41,6 +41,23 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
     <>
       <ViewHead title={UI.upload.title} lead={UI.upload.lead} />
       <div className="stack">
+        <Card>
+          <CardHead>
+            <span className="eyebrow">{UI.upload.templateHeading}</span>
+          </CardHead>
+          <p style={{ color: "var(--ink-2)", fontSize: "var(--t-sm)", marginBottom: 12 }}>
+            {UI.upload.templateBody}
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <a className="btn btn--primary" href="/hoja-oficial-colegio.pdf" download>
+              {UI.upload.templateDownload}
+            </a>
+            <span style={{ fontSize: "var(--t-sm)", color: "var(--ink-muted)" }}>
+              {UI.upload.templatePrintHint}
+            </span>
+          </div>
+        </Card>
+
         <div
           className="drop"
           tabIndex={0}
