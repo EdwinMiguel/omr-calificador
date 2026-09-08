@@ -11,7 +11,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildHalfSheetTemplate, minBubbleSeparationMm, MEASUREMENT_REACH_MM } from "./halfSheetTemplate.ts";
+import {
+  buildHalfSheetTemplate,
+  minBubbleSeparationMm,
+  minBubbleToCalibrationMm,
+  measurementReachMm,
+} from "./halfSheetTemplate.ts";
 import { validateTemplate } from "../../template.ts";
 
 describe("buildHalfSheetTemplate", () => {
@@ -65,13 +70,38 @@ describe("buildHalfSheetTemplate", () => {
     const t = buildHalfSheetTemplate(100);
     const minSep = minBubbleSeparationMm(t);
     const r = t.bubbleDiameterMm / 2;
-    const realMargin = minSep - r - MEASUREMENT_REACH_MM;
+    const realMargin = minSep - r - measurementReachMm(t);
 
     expect(realMargin).toBeGreaterThan(0);
-    // Documenta el valor medido esta semana (2026-09-08): si cambia, es
-    // porque alguien tocó el pitch — y eso exige la misma evidencia que
-    // pide PROMPT.md §7 para cualquier calibrable, no un ajuste silencioso.
-    expect(realMargin).toBeCloseTo(0.78, 2);
+    // Documenta el valor medido (2026-09-08): si cambia, es porque alguien
+    // tocó el pitch — y eso exige la misma evidencia que pide PROMPT.md §7
+    // para cualquier calibrable, no un ajuste silencioso.
+    //
+    // 0.742, no 0.78: el 0.78 salía de fijar el alcance a mano en 2.22mm.
+    // El alcance REAL es 2.258mm porque bubbleRoi redondea a píxeles
+    // enteros y el ROI no queda perfectamente centrado — por eso
+    // measurementReachMm() ahora lo deriva del mismo bubbleRoi que usa el
+    // motor en vez de declararlo como literal.
+    expect(realMargin).toBeCloseTo(0.742, 3);
+  });
+
+  /**
+   * REGRESIÓN de un bug real, encontrado en la verificación final y
+   * confirmado rasterizando el propio PDF: `validateTemplate()` recorre
+   * solo `groups[].bubbles`, así que NO mira los parches de calibración.
+   * Con los parches a 0.30mm de la última fila de preguntas, la ventana de
+   * muestreo de esas burbujas (2.26mm desde su centro) caía DENTRO del
+   * parche. Sobre una hoja sin marcar, las preguntas 20 y 40 medían
+   * 0.046-0.086 en vez del ±0.002 de ruido de sus vecinas.
+   *
+   * No rompía la lectura (las 100 seguían dando BLANK) pero esos valores
+   * entran en deriveSheetMarkContext como "perdedoras" e inflan el
+   * noiseHigh de TODA la hoja, que es lo que fija el piso de la regla de
+   * rescate — contaminaba la lectura de las otras 98 preguntas.
+   */
+  it("ningún parche de calibración cae dentro del alcance de muestreo de una burbuja", () => {
+    const t = buildHalfSheetTemplate(100);
+    expect(minBubbleToCalibrationMm(t)).toBeGreaterThan(measurementReachMm(t));
   });
 
   it("rechaza más de 100 preguntas: el layout no tiene dónde ponerlas", () => {

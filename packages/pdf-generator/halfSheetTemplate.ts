@@ -27,30 +27,42 @@
 
 import {
   validateTemplate,
+  bubbleRoi,
+  mmToPx,
+  pxToMm,
   type Template,
   type Marker,
   type CalibrationPatch,
   type BubbleGroup,
 } from "../../template.ts";
+import { SEARCH_RADIUS_PX } from "../../packages/engine/measurement.ts";
+
+/** DPI del lienzo canónico — el mismo que usa el motor en todo el pipeline. */
+const DPI = 200;
 
 /**
- * MEDIDO desde measurement.ts, no elegido: es el piso real de separación
- * entre burbujas, más estricto que el que exige validateTemplate() (que
- * solo pide bubbleDiameterMm + 0.8 = 3.8mm).
+ * Hasta dónde alcanza el muestreo de UNA burbuja, medido desde su centro.
+ * Es el piso real de separación, más estricto que el que exige
+ * validateTemplate() (que solo pide bubbleDiameterMm + 0.8 = 3.8mm).
  *
- *   ROI de burbuja = 3mm × 0.8 (shrink) = 2.4mm → 19px @200dpi → medio ROI 1.21mm
- *   SEARCH_RADIUS_PX = 8px → 1.016mm
- *   alcance del muestreo desde el centro de una burbuja = 2.22mm
+ *   medio ROI de la burbuja (bubbleRoi, shrink 0.8) + SEARCH_RADIUS_PX
  *
- * Con paso `p`, la tinta de la burbuja vecina empieza en `p - 1.5mm` (el
- * radio de la burbuja). El margen antes de que el ROI de una toque la
- * tinta de la otra es `p - 1.5 - 2.22`. Con el optionPitch elegido (4.5mm)
- * el margen queda en 0.78mm — positivo, pero es el número que la Fase 2
- * del plan (hojas físicas reales) tiene que confirmar antes de imprimir en
- * cantidad. CALIBRAR si aparecen fotos con desfases mayores a los medidos
- * esta semana (ver measurement.ts::SEARCH_RADIUS_PX).
+ * SE CALCULA, no se declara como literal: la primera versión de este
+ * archivo lo fijó a mano en 2.22mm y el número REAL es 2.258mm — bubbleRoi
+ * redondea a píxeles enteros (`Math.round`), así que el ROI de 19px no
+ * queda perfectamente centrado y un lado alcanza más que el otro. Un
+ * literal a mano se desincroniza en silencio en cuanto alguien toque el
+ * shrink, el DPI o SEARCH_RADIUS_PX; derivarlo del mismo `bubbleRoi` que
+ * usa el motor hace imposible esa clase de error.
  */
-const MEASUREMENT_REACH_MM = 2.22;
+export function measurementReachMm(t: Template): number {
+  const b = t.groups.find((g) => g.kind === "question")?.bubbles[0];
+  if (!b) throw new Error("El Template no tiene burbujas de pregunta de las que derivar el alcance");
+  const roi = bubbleRoi(b, t, DPI);
+  const centerPx = mmToPx(b.center.x, DPI);
+  const halfRoiPx = Math.max(centerPx - roi.x, roi.x + roi.w - centerPx);
+  return pxToMm(halfRoiPx + SEARCH_RADIUS_PX, DPI);
+}
 
 const LAYOUT_HALF = {
   // AÑADIDO — mitad de A4, corte horizontal. El ANCHO no cambia respecto a
@@ -116,10 +128,30 @@ const LAYOUT_HALF = {
   // SU PROPIA columna (composeHalfSheetA4.ts) resuelven las dos puntas.
   idGrid: { xStart: 168, yStart: 40, digits: 7, pitch: 4.5, rows: 10 },
 
-  // Debajo de la tabla de preguntas, en el espacio que sobra antes del
-  // borde de la página (última fila de preguntas termina en y≈126.7,
-  // el marcador BL/BR empieza en y≈132.5 — hay 5.8mm libres).
-  calibration: { y: 128, size: 6, gap: 3, xStart: 30, count: 3 },
+  // Debajo de la tabla de preguntas.
+  //
+  // y=131, no 128 — BUG REAL, encontrado midiendo y confirmado con una
+  // hoja en blanco rasterizada del propio PDF. `validateTemplate()` NO
+  // revisa los parches de calibración (solo mira `groups[].bubbles`), así
+  // que nada avisaba de esto: con y=128 los parches quedaban a 0.30mm del
+  // borde de la última fila de preguntas, y el muestreo de esas burbujas
+  // alcanza 2.26mm desde su centro (y=126.2 → 128.46). O sea que la
+  // ventana de medición de la fila 20 CAÍA DENTRO del parche.
+  //
+  // Medido sobre una hoja sin marcar (todas las preguntas deberían leer
+  // ruido puro, ±0.002):
+  //     Q19  ±0.002   ← fila sin parche debajo, referencia
+  //     Q20   B=0.046  D=0.049   ← 20× el ruido
+  //     Q40   B=0.082  D=0.086   ← 40× el ruido
+  // (B y D son las peores porque caen sobre el CENTRO de un parche; A, C y
+  // E caen sobre su borde.)
+  //
+  // No llegaba a romper la lectura —las 100 seguían dando BLANK— pero esos
+  // valores entran en deriveSheetMarkContext como "perdedoras" e inflan el
+  // `noiseHigh` de TODA la hoja, que es lo que fija el piso de la regla de
+  // rescate: contaminaba la lectura de las otras 98 preguntas, no solo de
+  // las dos afectadas. Con y=131 quedan 2.5mm de colchón sobre el alcance.
+  calibration: { y: 131, size: 6, gap: 3, xStart: 30, count: 3 },
 } as const;
 
 function makeMarkers(): Marker[] {
@@ -250,7 +282,30 @@ export function minBubbleSeparationMm(t: Template): number {
   return min;
 }
 
-export { MEASUREMENT_REACH_MM };
+/**
+ * Distancia mínima entre el borde de cualquier burbuja y el borde de
+ * cualquier parche de calibración, en mm.
+ *
+ * Existe porque `validateTemplate()` NO mira los parches: solo recorre
+ * `groups[].bubbles`. Los parches viven en `t.calibration`, y nada
+ * comprobaba que estuvieran fuera del alcance de muestreo de una burbuja
+ * — que es exactamente el bug que tuvo la primera versión de esta
+ * plantilla (ver la nota de `calibration` arriba).
+ */
+export function minBubbleToCalibrationMm(t: Template): number {
+  const r = t.bubbleDiameterMm / 2;
+  let min = Infinity;
+  for (const p of t.calibration) {
+    for (const g of t.groups) {
+      for (const b of g.bubbles) {
+        const dx = Math.max(p.rect.x - (b.center.x + r), b.center.x - r - (p.rect.x + p.rect.w), 0);
+        const dy = Math.max(p.rect.y - (b.center.y + r), b.center.y - r - (p.rect.y + p.rect.h), 0);
+        min = Math.min(min, Math.hypot(dx, dy));
+      }
+    }
+  }
+  return min;
+}
 
 // `typeof process` primero, no directamente process.argv: este archivo
 // también se empaqueta para el navegador (composeHalfSheetA4 correrá desde
@@ -260,18 +315,22 @@ if (typeof process !== "undefined" && import.meta.url === `file://${process.argv
   const errors = validateTemplate(t);
   const bubbles = t.groups.reduce((n, g) => n + g.bubbles.length, 0);
   const minSep = minBubbleSeparationMm(t);
+  const reach = measurementReachMm(t);
   const r = t.bubbleDiameterMm / 2;
-  // El ROI de una burbuja alcanza MEASUREMENT_REACH_MM desde SU centro; la
-  // tinta de la vecina empieza a (minSep - r) de ese mismo centro (el borde
-  // de SU disco, no el de la propia). Por eso es "- r", no "- 2r": mezclar
+  // El ROI de una burbuja alcanza `reach` desde SU centro; la tinta de la
+  // vecina empieza a (minSep - r) de ese mismo centro (el borde de SU
+  // disco, no el de la propia). Por eso es "- r", no "- 2r": mezclar
   // diámetro y radio acá fue un bug real la primera vez que se escribió esto.
-  const realMargin = minSep - r - MEASUREMENT_REACH_MM;
+  const realMargin = minSep - r - reach;
+  const calibClear = minBubbleToCalibrationMm(t);
 
   console.log(`Plantilla ${t.id} v${t.version}`);
   console.log(`  página: ${t.page.widthMm}×${t.page.heightMm}mm`);
   console.log(`  grupos: ${t.groups.length}  burbujas: ${bubbles}`);
+  console.log(`  alcance del muestreo: ${reach.toFixed(3)}mm desde el centro de cada burbuja`);
   console.log(`  separación mínima entre burbujas: ${minSep.toFixed(2)}mm (piso validateTemplate: ${(r * 2 + 0.8).toFixed(2)}mm)`);
-  console.log(`  margen real de medición: ${realMargin.toFixed(2)}mm`);
+  console.log(`  margen real entre burbujas: ${realMargin.toFixed(3)}mm ${realMargin > 0 ? "✓" : "✗ NEGATIVO"}`);
+  console.log(`  holgura burbuja↔parche de calibración: ${calibClear.toFixed(2)}mm ${calibClear > reach ? "✓" : "✗ EL MUESTREO ALCANZA EL PARCHE"}`);
   console.log(errors.length ? `\n✗ ${errors.length} errores:` : `\n✓ geometría válida`);
   errors.slice(0, 15).forEach((e) => console.log("  " + e));
 }

@@ -237,11 +237,31 @@ function drawHalfSheet(page: PDFPage, t: Template, info: HeaderInfo, font: PDFFo
 
 /**
  * Línea de corte punteada exactamente donde las dos mitades se tocan
- * (y = t.page.heightMm en la A4 completa) + una marca de tijera en cada
- * extremo. Sin esto, cortar "más o menos a la mitad" arriesga recortar un
- * marcador — a 12mm del borde de corte, un desvío de más de 12mm produce
- * MARKERS_NOT_FOUND (rechazo seguro), pero un desvío menor que deja pegado
- * un pedazo del marcador de la OTRA mitad puede confundir al detector.
+ * (y = t.page.heightMm en la A4 completa). Sin esto, cortar "más o menos a
+ * la mitad" arriesga recortar un marcador — a 12mm del borde de corte, un
+ * desvío de más de 12mm produce MARKERS_NOT_FOUND (rechazo seguro), pero un
+ * desvío menor que deja pegado un pedazo del marcador de la OTRA mitad
+ * puede confundir al detector.
+ *
+ * ── QUÉ PASA SI NO SE CORTA, medido (no supuesto) ───────────────────────
+ * Se rasterizó esta misma A4 y se le pasó al motor entera, con sus 8
+ * marcadores (4 por mitad):
+ *
+ *   geometría .... "resuelve" con reproj=0.000 — arma una homografía con
+ *                  4 de los 8 marcadores, sin notar que sobran
+ *   preguntas .... 92 BLANK, 1 MULTIPLE, 7 AMBIGUOUS
+ *   respuestas ... CERO auto-aceptadas
+ *   hoja ......... rechazada (STUDENT_ID_UNREADABLE)
+ *
+ * O sea: el comportamiento es SEGURO — la hoja se rechaza entera y no se
+ * inventa ninguna nota, que es lo que exige PROMPT.md §15. Lo que falla es
+ * el MENSAJE: el operador ve "código ilegible, escríbelo a mano", que no
+ * tiene nada que ver con el problema real ("olvidaste cortar la hoja").
+ *
+ * NO se arregla en el motor a propósito: detectar "sobran marcadores"
+ * obliga a tocar fiducials.ts/geometry.ts, hoy el único código validado
+ * contra 3 hojas con verdad conocida. El lugar para avisar es la interfaz,
+ * en la Fase 3 del plan.
  */
 function drawCutGuide(page: PDFPage, fullHeightMm: number, widthMm: number) {
   const cutYMm = fullHeightMm / 2;

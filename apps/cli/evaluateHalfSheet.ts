@@ -64,21 +64,27 @@ function findGroundTruth(sha256: string, fileName: string): GroundTruth | null {
   return null;
 }
 
-/** Todas las opciones NO marcadas de las preguntas donde la verdad SÍ
- * conoce cuál se marcó — la misma definición de "negativo conocido" que
- * usó el experimento del estimador (dataset original con 3 hojas). */
+/**
+ * Brecha = peor positivo verdadero − mejor negativo verdadero.
+ *
+ * Una pregunta que el alumno dejó EN BLANCO no aporta positivo, pero sus
+ * CINCO opciones son negativos verdaderos y cuentan: son exactamente el
+ * caso donde el motor puede inventar una respuesta. Excluirlas hace que la
+ * brecha se vea mejor de lo que es — es la misma definición que usó el
+ * experimento del estimador sobre las 3 hojas actuales, donde la Q73 en
+ * blanco de la hoja escaneada aportó sus 5 opciones como negativos.
+ */
 function separationGap(
   questions: QuestionResult[], measurements: Record<number, Record<string, number>>, marks: Record<string, string | null>
-): { gap: number | null; worstPositive: number; bestNegative: number } | null {
+): { gap: number; worstPositive: number; bestNegative: number } | null {
   const pos: number[] = [];
   const neg: number[] = [];
   for (const q of questions) {
-    const truth = marks[String(q.ordinal)];
-    if (truth == null) continue; // pregunta en blanco a propósito: no aporta positivo ni negativo de opción
+    const truth = marks[String(q.ordinal)] ?? null;
     const fills = measurements[q.ordinal];
     if (!fills) continue;
     for (const [label, v] of Object.entries(fills)) {
-      if (label === truth) pos.push(v);
+      if (truth !== null && label === truth) pos.push(v);
       else neg.push(v);
     }
   }
@@ -131,50 +137,64 @@ async function main() {
     const bytes = readFileSync(join(inputDir, fileName));
     const sha256 = sha256Hex(bytes);
     const pages = await loadPages(join(inputDir, fileName));
-    const img = pages[0]!;
 
-    const outcome = await analyzeSheet(img, t, DPI, {});
+    // TODAS las páginas, no solo la primera: escanear varias mitades con un
+    // alimentador automático produce un PDF multipágina, y ese es justo el
+    // flujo de la Fase 2. Procesar solo pages[0] descartaba el resto en
+    // silencio, que es la peor forma de perder una hoja.
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const img = pages[pageIndex]!;
+      const label = pages.length > 1 ? `${fileName} p.${pageIndex + 1}` : fileName;
 
-    if (outcome.kind === "rejected" && !outcome.partial) {
-      geometryFails++;
-      console.log(`✗ ${fileName}: RECHAZADA sin lectura parcial — ${outcome.reason}`);
-      continue;
-    }
+      const outcome = await analyzeSheet(img, t, DPI, {});
 
-    const questions = outcome.kind === "processed" ? outcome.result.questions : outcome.partial!.questions;
-    const measurements = outcome.kind === "processed" ? outcome.result.measurements : outcome.partial!.measurements;
-    const reproj = outcome.kind === "processed" ? outcome.result.reprojectionErrorPx : outcome.partial!.reprojectionErrorPx;
-    const method = outcome.kind === "processed" ? outcome.result.thresholdMethod : outcome.partial!.thresholdMethod;
-
-    const gt = findGroundTruth(sha256, basename(fileName));
-    const tag = outcome.kind === "processed" ? "procesada" : `rechazada (${outcome.reason}, con lectura parcial)`;
-    console.log(`${gt ? "✓" : "○"} ${fileName}: ${tag} — reproj=${reproj.toFixed(3)}px vía ${method}${gt ? "" : "  [sin ground-truth]"}`);
-
-    if (!gt) continue;
-
-    let ok = 0, err = 0, rev = 0;
-    const badList: string[] = [];
-    for (const q of questions) {
-      const truth = gt.marks[String(q.ordinal)] ?? null;
-      const st = q.state;
-      if (st.kind === "ANSWERED") {
-        if (st.option === truth) ok++;
-        else { err++; badList.push(`  ✗ Q${q.ordinal} leyó ${st.option}, verdad ${truth ?? "BLANCO"}`); }
-      } else if (st.kind === "BLANK") {
-        if (truth === null) ok++;
-        else { err++; badList.push(`  ✗ Q${q.ordinal} leyó BLANCO, verdad ${truth}`); }
-      } else {
-        rev++;
+      if (outcome.kind === "rejected" && !outcome.partial) {
+        geometryFails++;
+        console.log(`✗ ${label}: RECHAZADA sin lectura parcial — ${outcome.reason}`);
+        continue;
       }
-    }
-    totalOk += ok; totalErr += err; totalRev += rev;
-    console.log(`    verdad: ${ok} ok / ${err} INCORRECTAS / ${rev} revisión`);
-    for (const b of badList) { console.log(b); errList.push(`${fileName} ${b.trim()}`); }
 
-    const sep = separationGap(questions, measurements, gt.marks);
-    if (sep) {
-      gaps.push({ file: fileName, gap: sep.gap! });
-      console.log(`    brecha de separación: ${sep.gap!.toFixed(3)} (peor positivo ${sep.worstPositive.toFixed(3)}, mejor negativo ${sep.bestNegative.toFixed(3)})`);
+      const questions = outcome.kind === "processed" ? outcome.result.questions : outcome.partial!.questions;
+      const measurements = outcome.kind === "processed" ? outcome.result.measurements : outcome.partial!.measurements;
+      const reproj = outcome.kind === "processed" ? outcome.result.reprojectionErrorPx : outcome.partial!.reprojectionErrorPx;
+      const method = outcome.kind === "processed" ? outcome.result.thresholdMethod : outcome.partial!.thresholdMethod;
+
+      // El ground-truth se identifica por el sha256 del ARCHIVO, así que en un
+      // PDF de varias hojas no hay forma de saber qué verdad corresponde a qué
+      // página. Se dice en voz alta en vez de casar la primera y callar.
+      const gt = pages.length > 1 ? null : findGroundTruth(sha256, basename(fileName));
+      const gtNote = pages.length > 1
+        ? "  [multipágina: la verdad se busca por archivo, hace falta un archivo por hoja]"
+        : gt ? "" : "  [sin ground-truth]";
+      const tag = outcome.kind === "processed" ? "procesada" : `rechazada (${outcome.reason}, con lectura parcial)`;
+      console.log(`${gt ? "✓" : "○"} ${label}: ${tag} — reproj=${reproj.toFixed(3)}px vía ${method}${gtNote}`);
+
+      if (!gt) continue;
+
+      let ok = 0, err = 0, rev = 0;
+      const badList: string[] = [];
+      for (const q of questions) {
+        const truth = gt.marks[String(q.ordinal)] ?? null;
+        const st = q.state;
+        if (st.kind === "ANSWERED") {
+          if (st.option === truth) ok++;
+          else { err++; badList.push(`  ✗ Q${q.ordinal} leyó ${st.option}, verdad ${truth ?? "BLANCO"}`); }
+        } else if (st.kind === "BLANK") {
+          if (truth === null) ok++;
+          else { err++; badList.push(`  ✗ Q${q.ordinal} leyó BLANCO, verdad ${truth}`); }
+        } else {
+          rev++;
+        }
+      }
+      totalOk += ok; totalErr += err; totalRev += rev;
+      console.log(`    verdad: ${ok} ok / ${err} INCORRECTAS / ${rev} revisión`);
+      for (const b of badList) { console.log(b); errList.push(`${label} ${b.trim()}`); }
+
+      const sep = separationGap(questions, measurements, gt.marks);
+      if (sep) {
+        gaps.push({ file: label, gap: sep.gap });
+        console.log(`    brecha de separación: ${sep.gap.toFixed(3)} (peor positivo ${sep.worstPositive.toFixed(3)}, mejor negativo ${sep.bestNegative.toFixed(3)})`);
+      }
     }
   }
 
