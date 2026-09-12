@@ -152,6 +152,15 @@ const LAYOUT_HALF = {
   // rescate: contaminaba la lectura de las otras 98 preguntas, no solo de
   // las dos afectadas. Con y=131 quedan 2.5mm de colchón sobre el alcance.
   calibration: { y: 131, size: 6, gap: 3, xStart: 30, count: 3 },
+
+  // AÑADIDO — "INDICACIONES", la misma línea que traía el PDF original del
+  // profesor (ver la nota sobre interlineado en officialTemplate.ts). No
+  // reposiciona nada del diseño ya medido y verificado: va en el único
+  // tramo de la página que queda completamente libre — debajo de los
+  // parches de calibración (terminan en y=137) y por encima del margen de
+  // 5mm del borde inferior de la página (148.5), fuera del rango x de los
+  // marcadores BL/BR (que solo ocupan x=[8,16] y [194,202]).
+  indicaciones: { x: 20, y: 139, w: 170, h: 6 },
 } as const;
 
 function makeMarkers(): Marker[] {
@@ -258,7 +267,10 @@ export function buildHalfSheetTemplate(questionCount = 100): Template {
     markers: makeMarkers(),
     calibration: makeCalibration(),
     groups: [...makeAddedGroups(), ...makeQuestionGroups(questionCount)],
-    reserved: [{ id: "cabecera", rect: { ...LAYOUT_HALF.cabecera } }],
+    reserved: [
+      { id: "cabecera", rect: { ...LAYOUT_HALF.cabecera } },
+      { id: "indicaciones", rect: { ...LAYOUT_HALF.indicaciones } },
+    ],
   };
 }
 

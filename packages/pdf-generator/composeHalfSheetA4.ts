@@ -226,13 +226,37 @@ function drawCabecera(page: PDFPage, t: Template, info: HeaderInfo, font: PDFFon
   drawLineMm(cab.x + 94, y3 + 0.8, cab.x + cab.w);
 }
 
+/**
+ * "INDICACIONES", la misma línea que traía el PDF original del profesor.
+ * Va en `t.reserved` (no en LAYOUT_HALF.questions/idGrid/calibration, que
+ * quedan intactos): el único tramo de la página que sigue completamente
+ * libre después de todo lo demás — debajo de los parches de calibración,
+ * antes del margen de 5mm del borde inferior de la página.
+ *
+ * Medido con font.widthOfTextAtSize antes de fijar el tamaño (mismo método
+ * que ya evitó un error de cálculo a ojo en drawCabecera): a 6.5pt el texto
+ * completo mide 113.5mm, contra 170mm disponibles — entra en una sola
+ * línea con margen de sobra, sin necesidad de partirlo en dos renglones.
+ */
+function drawIndicaciones(page: PDFPage, t: Template, font: PDFFont, yOffsetMm: number) {
+  const H = t.page.heightMm;
+  const rect = t.reserved.find((r) => r.id === "indicaciones")!.rect;
+  const { x, y } = toPdfXY(rect.x, rect.y + 3, H, yOffsetMm);
+  page.drawText(
+    "INDICACIONES: Marque solo una alternativa por pregunta. Use lápiz negro y rellene completamente la burbuja.",
+    { x, y, size: 6.5, font }
+  );
+}
+
 /** Dibuja una media hoja completa (marcadores, calibración, burbujas,
- * cabecera) en `page`, desplazada `yOffsetMm` desde el borde inferior. */
+ * cabecera, indicaciones) en `page`, desplazada `yOffsetMm` desde el borde
+ * inferior. */
 function drawHalfSheet(page: PDFPage, t: Template, info: HeaderInfo, font: PDFFont, bold: PDFFont, yOffsetMm: number) {
   drawMarkers(page, t, yOffsetMm);
   drawCalibration(page, t, yOffsetMm);
   drawBubbles(page, t, font, yOffsetMm);
   drawCabecera(page, t, info, font, bold, yOffsetMm);
+  drawIndicaciones(page, t, font, yOffsetMm);
 }
 
 /**
