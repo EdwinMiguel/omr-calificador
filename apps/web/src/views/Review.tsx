@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BatchDetail, SheetSummary } from "../engine-browser/localClient.ts";
 import { postCorrection } from "../engine-browser/localClient.ts";
-import { PROMOTE_MAX_SECOND_RATIO } from "../../../../packages/engine/classification.ts";
+import { suggestionFor } from "./batchSuggestion.ts";
 import { UI, REVIEW_REASON } from "../strings.ts";
 import { Card, CardHead, Chip, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
 import { SheetCanvas, type CanvasQuestion } from "../ui/SheetCanvas.tsx";
@@ -18,34 +18,13 @@ interface Item {
   sheetId: string;
   studentId: string;
   ordinal: number;
+  /** Veredicto del motor, sin traducir: lo necesita suggestionFor(). */
+  kind: string;
   reason: string;
   options: string[];
 }
 
 const OPTIONS = ["A", "B", "C", "D", "E"];
-
-/**
- * "Confirmar por lote" — PROMPT.md §15 exige revisión manual antes que
- * respuesta inventada, no exige que esa revisión cueste un clic por
- * pregunta. Lo caro no eran los 12 errores (0 errores: el motor ya
- * identifica bien CUÁL opción se marcó, ver la nota de Q51 en el registro
- * de la hoja de prueba) — lo caro eran los 12 clics para confirmar algo
- * que a simple vista ya se ve clarísimo.
- *
- * Esta función decide qué preguntas ofrecer PRESELECCIONADAS: la misma
- * pregunta que ya resuelve canPromote() en classification.ts —¿el ganador
- * es inequívoco?— pero acá NUNCA decide sola: solo arma una sugerencia que
- * la persona tiene que confirmar mirándola. Nunca se auto-aplica.
- */
-function suggestionFor(fills: Record<string, number> | undefined): { label: string; value: number } | null {
-  if (!fills) return null;
-  const sorted = Object.entries(fills).sort((a, b) => b[1] - a[1]);
-  const top = sorted[0];
-  if (!top || top[1] <= 0) return null;
-  const second = sorted[1];
-  if (second && second[1] > top[1] * PROMOTE_MAX_SECOND_RATIO) return null;
-  return { label: top[0], value: top[1] };
-}
 
 export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved: () => void }) {
   const items = useMemo<Item[]>(() => {
@@ -58,6 +37,7 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
           sheetId: s.id,
           studentId: s.projected.studentId,
           ordinal: q.ordinal,
+          kind: q.state.kind,
           reason: REVIEW_REASON[q.state.kind] ?? q.state.kind,
           options: OPTIONS,
         });
@@ -98,17 +78,29 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
     const measurements = sheetMeasurements(sheetForCurrent);
     return items
       .filter((it) => it.sheetId === current.sheetId)
-      .map((it) => ({ ...it, suggestion: suggestionFor(measurements[it.ordinal]) }));
+      .map((it) => ({ ...it, suggestion: suggestionFor(it.kind, measurements[it.ordinal]) }));
   }, [items, current?.sheetId, sheetForCurrent]);
 
   const [included, setIncluded] = useState<Set<number>>(new Set());
   const [batchSaving, setBatchSaving] = useState(false);
 
-  // Al cambiar de hoja, vuelve a marcar todas las que tengan sugerencia —
-  // el operador puede destildar las que no le convenzan antes de confirmar.
+  const suggestable = sheetItems.filter((it) => it.suggestion);
+  // Firma del conjunto ofrecible. Es la dependencia correcta —y no solo la
+  // hoja—: al confirmar un lote las preguntas resueltas salen de la cola sin
+  // que cambie sheetId, y si el reinicio no mirara eso, `included` quedaría
+  // con ordinales ya resueltos y el botón contaría preguntas que ya no están.
+  const suggestableKey = suggestable.map((it) => it.ordinal).join(",");
+
+  // Lo que realmente se va a escribir. Se deriva de lo ofrecible —no de
+  // `included` a secas— para que el número del botón sea siempre el número de
+  // preguntas que el botón va a confirmar.
+  const selected = suggestable.filter((it) => included.has(it.ordinal));
+
+  // Arranca con todas tildadas; el operador destilda las que no le convenzan
+  // antes de confirmar.
   useEffect(() => {
-    setIncluded(new Set(sheetItems.filter((it) => it.suggestion).map((it) => it.ordinal)));
-  }, [current?.sheetId]);
+    setIncluded(new Set(suggestable.map((it) => it.ordinal)));
+  }, [current?.sheetId, suggestableKey]);
 
   function toggleIncluded(ordinal: number) {
     setIncluded((prev) => {
@@ -126,12 +118,10 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
    * si alguna vez hace falta diferenciar cuántas se confirmaron así.
    */
   async function confirmBatch() {
-    if (batchSaving) return;
-    const toApply = sheetItems.filter((it) => included.has(it.ordinal) && it.suggestion);
-    if (toApply.length === 0) return;
+    if (batchSaving || selected.length === 0) return;
     setBatchSaving(true);
     try {
-      for (const it of toApply) {
+      for (const it of selected) {
         await postCorrection(it.sheetId, {
           ordinal: it.ordinal,
           resolvedAs: it.suggestion!.label,
@@ -139,9 +129,12 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
         });
       }
       setIndex(0);
-      onResolved();
     } finally {
       setBatchSaving(false);
+      // Siempre, incluso si una corrección falló a mitad de camino: las
+      // anteriores YA se escribieron, y la pantalla tiene que mostrar lo que
+      // realmente quedó guardado, no lo que se intentó guardar.
+      onResolved();
     }
   }
 
@@ -169,8 +162,6 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
 
   const sheet = sheetForCurrent;
 
-  const suggestedCount = sheetItems.filter((it) => it.suggestion).length;
-
   return (
     <>
       <ViewHead title={UI.review.title} lead={UI.review.lead} />
@@ -184,7 +175,7 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
           <p style={{ padding: "0 18px", margin: "8px 0 12px", color: "var(--ink-2)", fontSize: "var(--t-sm)" }}>
             {UI.review.batchLead}
           </p>
-          {suggestedCount === 0 ? (
+          {suggestable.length === 0 ? (
             <p style={{ padding: "0 18px 16px", color: "var(--ink-muted)", fontSize: "var(--t-sm)" }}>
               {UI.review.batchNone}
             </p>
@@ -224,10 +215,10 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
               <div style={{ padding: 14 }}>
                 <button
                   className="btn btn--primary"
-                  disabled={included.size === 0 || batchSaving}
+                  disabled={selected.length === 0 || batchSaving}
                   onClick={() => void confirmBatch()}
                 >
-                  {batchSaving ? UI.common.loading : UI.review.batchConfirm(included.size)}
+                  {batchSaving ? UI.common.loading : UI.review.batchConfirm(selected.length)}
                 </button>
               </div>
             </>

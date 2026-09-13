@@ -247,12 +247,19 @@ export interface LabeledFill {
  * no alcanza para auto-aceptar sin arriesgar inventar una respuesta en una
  * pregunta que el alumno dejó vacía.
  *
- * EXPORTADA (no solo interna): Review.tsx la reusa para decidir qué
+ * EXPORTADA (no solo interna): batchSuggestion.ts la reusa para decidir qué
  * preguntas pendientes ofrecer como "sugerencia de lote" — mismo criterio
  * ("¿el ganador es inequívoco?"), pero ahí decide qué PRESELECCIONAR para
  * que un humano confirme, nunca qué auto-aceptar. Reusar el número en vez
  * de declarar uno paralelo en la UI evita que las dos nociones de
  * "inequívoco" se desincronicen con el tiempo.
+ *
+ * OJO, y está medido: esta razón NO TIENE ESCALA. `0.032 contra 0.013` la
+ * pasa igual que `0.40 contra 0.15`, así que sobre papel vacío el ruido la
+ * pasa sin problema. Acá adentro eso no importa porque canPromote() exige
+ * además los dos pisos de abajo; quien la use SUELTA tiene que poner su
+ * propia defensa contra preguntas vacías (batchSuggestion.ts lo hace
+ * excluyendo las que el motor ya clasificó BLANK — ver su nota).
  */
 export const PROMOTE_MAX_SECOND_RATIO = 0.5;
 const PROMOTE_MIN_LEVEL_FRACTION = 0.45;
