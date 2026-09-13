@@ -246,8 +246,15 @@ export interface LabeledFill {
  * pregunta vacía en ESA hoja es 0.118, o sea 0.015 de diferencia. Ese margen
  * no alcanza para auto-aceptar sin arriesgar inventar una respuesta en una
  * pregunta que el alumno dejó vacía.
+ *
+ * EXPORTADA (no solo interna): Review.tsx la reusa para decidir qué
+ * preguntas pendientes ofrecer como "sugerencia de lote" — mismo criterio
+ * ("¿el ganador es inequívoco?"), pero ahí decide qué PRESELECCIONAR para
+ * que un humano confirme, nunca qué auto-aceptar. Reusar el número en vez
+ * de declarar uno paralelo en la UI evita que las dos nociones de
+ * "inequívoco" se desincronicen con el tiempo.
  */
-const PROMOTE_MAX_SECOND_RATIO = 0.5;
+export const PROMOTE_MAX_SECOND_RATIO = 0.5;
 const PROMOTE_MIN_LEVEL_FRACTION = 0.45;
 const PROMOTE_NOISE_MARGIN = 0.08;
 const PROMOTE_MIN_CONFIDENT_MARKS = 10;

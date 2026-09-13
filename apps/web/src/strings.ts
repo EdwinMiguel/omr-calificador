@@ -143,6 +143,11 @@ export const UI = {
     keyboardHint: "elegir",
     keyboardConfirm: "confirmar",
     thresholds: { blank: "en blanco <", mark: "marca ≥", margin: "margen mín." },
+    batchTitle: "Confirmar por lote — esta hoja",
+    batchLead: "La opción más oscura de cada pregunta, solo cuando se despega con claridad de las demás. Revisá la lista antes de confirmar: seguís siendo vos quien decide, no el sistema.",
+    batchNone: "Ninguna pendiente de esta hoja tiene un ganador lo bastante claro — revisalas una por una abajo.",
+    batchConfirm: (n: number) => `Confirmar ${n} seleccionada${n === 1 ? "" : "s"}`,
+    batchNoSuggestion: "sin ganador claro",
   },
 
   rejected: {

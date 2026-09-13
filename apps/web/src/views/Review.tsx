@@ -9,8 +9,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BatchDetail, SheetSummary } from "../engine-browser/localClient.ts";
 import { postCorrection } from "../engine-browser/localClient.ts";
+import { PROMOTE_MAX_SECOND_RATIO } from "../../../../packages/engine/classification.ts";
 import { UI, REVIEW_REASON } from "../strings.ts";
-import { Card, Chip, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
+import { Card, CardHead, Chip, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
 import { SheetCanvas, type CanvasQuestion } from "../ui/SheetCanvas.tsx";
 
 interface Item {
@@ -22,6 +23,29 @@ interface Item {
 }
 
 const OPTIONS = ["A", "B", "C", "D", "E"];
+
+/**
+ * "Confirmar por lote" — PROMPT.md §15 exige revisión manual antes que
+ * respuesta inventada, no exige que esa revisión cueste un clic por
+ * pregunta. Lo caro no eran los 12 errores (0 errores: el motor ya
+ * identifica bien CUÁL opción se marcó, ver la nota de Q51 en el registro
+ * de la hoja de prueba) — lo caro eran los 12 clics para confirmar algo
+ * que a simple vista ya se ve clarísimo.
+ *
+ * Esta función decide qué preguntas ofrecer PRESELECCIONADAS: la misma
+ * pregunta que ya resuelve canPromote() en classification.ts —¿el ganador
+ * es inequívoco?— pero acá NUNCA decide sola: solo arma una sugerencia que
+ * la persona tiene que confirmar mirándola. Nunca se auto-aplica.
+ */
+function suggestionFor(fills: Record<string, number> | undefined): { label: string; value: number } | null {
+  if (!fills) return null;
+  const sorted = Object.entries(fills).sort((a, b) => b[1] - a[1]);
+  const top = sorted[0];
+  if (!top || top[1] <= 0) return null;
+  const second = sorted[1];
+  if (second && second[1] > top[1] * PROMOTE_MAX_SECOND_RATIO) return null;
+  return { label: top[0], value: top[1] };
+}
 
 export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved: () => void }) {
   const items = useMemo<Item[]>(() => {
@@ -66,6 +90,61 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
     }
   }
 
+  // Todas las pendientes de LA MISMA HOJA que la que se está mirando, cada
+  // una con su sugerencia (o sin ninguna, si no hay ganador inequívoco).
+  const sheetForCurrent = current ? detail.sheets.find((s) => s.id === current.sheetId) : undefined;
+  const sheetItems = useMemo(() => {
+    if (!current) return [];
+    const measurements = sheetMeasurements(sheetForCurrent);
+    return items
+      .filter((it) => it.sheetId === current.sheetId)
+      .map((it) => ({ ...it, suggestion: suggestionFor(measurements[it.ordinal]) }));
+  }, [items, current?.sheetId, sheetForCurrent]);
+
+  const [included, setIncluded] = useState<Set<number>>(new Set());
+  const [batchSaving, setBatchSaving] = useState(false);
+
+  // Al cambiar de hoja, vuelve a marcar todas las que tengan sugerencia —
+  // el operador puede destildar las que no le convenzan antes de confirmar.
+  useEffect(() => {
+    setIncluded(new Set(sheetItems.filter((it) => it.suggestion).map((it) => it.ordinal)));
+  }, [current?.sheetId]);
+
+  function toggleIncluded(ordinal: number) {
+    setIncluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(ordinal)) next.delete(ordinal); else next.add(ordinal);
+      return next;
+    });
+  }
+
+  /**
+   * Aplica la sugerencia de cada pregunta SELECCIONADA, una por una — mismo
+   * postCorrection() que usa la confirmación individual, con el mismo
+   * registro de auditoría (§13.9: append-only, nunca se sobrescribe nada).
+   * Se distingue el motivo en el registro ("lote" vs "revisión manual") por
+   * si alguna vez hace falta diferenciar cuántas se confirmaron así.
+   */
+  async function confirmBatch() {
+    if (batchSaving) return;
+    const toApply = sheetItems.filter((it) => included.has(it.ordinal) && it.suggestion);
+    if (toApply.length === 0) return;
+    setBatchSaving(true);
+    try {
+      for (const it of toApply) {
+        await postCorrection(it.sheetId, {
+          ordinal: it.ordinal,
+          resolvedAs: it.suggestion!.label,
+          reason: "revisión manual (lote)",
+        });
+      }
+      setIndex(0);
+      onResolved();
+    } finally {
+      setBatchSaving(false);
+    }
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!current) return;
@@ -88,11 +167,74 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
     );
   }
 
-  const sheet = detail.sheets.find((s) => s.id === current!.sheetId);
+  const sheet = sheetForCurrent;
+
+  const suggestedCount = sheetItems.filter((it) => it.suggestion).length;
 
   return (
     <>
       <ViewHead title={UI.review.title} lead={UI.review.lead} />
+
+      {sheetItems.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <CardHead>
+            <span className="eyebrow">{UI.review.batchTitle}</span>
+            <span className="topbar-meta mono">{UI.common.questions(sheetItems.length)}</span>
+          </CardHead>
+          <p style={{ padding: "0 18px", margin: "8px 0 12px", color: "var(--ink-2)", fontSize: "var(--t-sm)" }}>
+            {UI.review.batchLead}
+          </p>
+          {suggestedCount === 0 ? (
+            <p style={{ padding: "0 18px 16px", color: "var(--ink-muted)", fontSize: "var(--t-sm)" }}>
+              {UI.review.batchNone}
+            </p>
+          ) : (
+            <>
+              <div className="filelist">
+                {sheetItems.map((it) => (
+                  <label
+                    key={it.ordinal}
+                    className="filerow"
+                    style={{ cursor: it.suggestion ? "pointer" : "default", opacity: it.suggestion ? 1 : 0.5 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={included.has(it.ordinal)}
+                      disabled={!it.suggestion}
+                      onChange={() => toggleIncluded(it.ordinal)}
+                      style={{ accentColor: "var(--accent)" }}
+                    />
+                    <div>
+                      <div className="filerow-name">{UI.review.question(it.ordinal)}</div>
+                      <div className="filerow-hash">{it.reason}</div>
+                    </div>
+                    <div className="filerow-right">
+                      {it.suggestion ? (
+                        <>
+                          <span className="kbd">{it.suggestion.label}</span>
+                          <span className="topbar-meta mono">{it.suggestion.value.toFixed(3)}</span>
+                        </>
+                      ) : (
+                        <span className="topbar-meta">{UI.review.batchNoSuggestion}</span>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div style={{ padding: 14 }}>
+                <button
+                  className="btn btn--primary"
+                  disabled={included.size === 0 || batchSaving}
+                  onClick={() => void confirmBatch()}
+                >
+                  {batchSaving ? UI.common.loading : UI.review.batchConfirm(included.size)}
+                </button>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
       <div className="review-layout">
         <div className="queue">
           <div className="queue-head">
