@@ -22,7 +22,7 @@ import { analyzeGeometry } from "../../packages/engine/geometry.ts";
 import { renderReadingOverlay, type ReadingMark } from "../../packages/engine/readingOverlay.ts";
 import type { GrayImage } from "../../packages/engine/types.ts";
 import sharp from "sharp";
-import { buildOfficialTemplate } from "../../packages/pdf-generator/officialTemplate.ts";
+import { buildHalfSheetTemplate } from "../../packages/pdf-generator/halfSheetTemplate.ts";
 import { projectSheet, computeBatchMetrics, type ProjectedSheet } from "../../packages/domain/sheetProjection.ts";
 import type { QuestionResult } from "../../packages/engine/scoring.ts";
 import { FileRepository } from "./storage/fileRepo.ts";
@@ -30,7 +30,9 @@ import type { StoredSheet } from "./storage/types.ts";
 
 const DPI = 200;
 const DATA_DIR = process.env.OMR_DATA_DIR ?? join(process.cwd(), ".data");
-const template = buildOfficialTemplate(100);
+// Ver la nota de omrWorker.ts: hoja-media-a4 es la plantilla de producción
+// desde la Fase 2.
+const template = buildHalfSheetTemplate(100);
 
 const repo = new FileRepository(join(DATA_DIR, "events.jsonl"));
 

@@ -120,9 +120,22 @@ export interface SheetResult {
  * resuelve y qué va a revisión; la ESCALA de `measurements` es la misma que
  * en 0.3.0, así que esos números sí son comparables entre las dos.
  *
+ * 0.3.1 → 0.4.0: cambia la PLANTILLA de producción (omrWorker.ts,
+ * localClient.ts, server.ts) de la hoja oficial de una A4 por alumno a
+ * hoja-media-a4 (2 exámenes por A4, cortados por la mitad) — Fase 2 del
+ * plan cerrada con 2 escaneos reales, 0 auto-aceptadas incorrectas (ver
+ * evaluateHalfSheet.ts y los ground-truth de hojas-escaneadas/). No es un
+ * recalibrado de umbral: es literalmente OTRA geometría, con otra cantidad
+ * de burbujas por fila y otro paso entre ellas. Los `measurements` de
+ * antes de 0.4.0 no son comparables ni de cerca — corresponden a burbujas
+ * en posiciones distintas de una hoja distinta. buildOfficialTemplate()
+ * sigue existiendo (no se borra: analyzeSheet.test.ts la sigue usando
+ * contra sus 3 hojas con verdad conocida) — 0.4.0 es sobre cuál usa la app
+ * por defecto, no sobre qué existe en el código.
+ *
  * Los `measurements` de 0.2.x y anteriores están en otra escala: comparables
  * entre sí, NO comparables uno a uno con los de 0.3.x. */
-export const ENGINE_VERSION = "0.3.1";
+export const ENGINE_VERSION = "0.4.0";
 
 /**
  * MEDIDO de forma indirecta, no contra una foto de papel genuinamente en

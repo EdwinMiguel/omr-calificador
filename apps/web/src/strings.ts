@@ -90,7 +90,7 @@ export const UI = {
     templateHeading: "¿Todavía no imprimiste las hojas?",
     templateBody: "El sistema solo lee ESTA hoja: sus marcadores y sus burbujas están en coordenadas fijas que el motor ya conoce. Cualquier otra plantilla, aunque tenga las mismas 100 preguntas, no se va a leer.",
     templateDownload: "Descargar hoja oficial (PDF)",
-    templatePrintHint: "Imprime al 100% de tamaño real — sin \"ajustar a página\".",
+    templatePrintHint: "Imprime al 100% de tamaño real — sin \"ajustar a página\" — y corta por la línea punteada: cada mitad es la hoja privada de un alumno distinto.",
     dropTitle: "Suelta aquí las hojas escaneadas",
     dropSub: "o haz clic para elegir archivos",
     // TIFF ya no se anuncia: el motor corre en el navegador y ningún

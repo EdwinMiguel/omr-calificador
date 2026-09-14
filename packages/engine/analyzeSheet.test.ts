@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { analyzeSheet } from "./analyzeSheet.ts";
 import { buildOfficialTemplate } from "../pdf-generator/officialTemplate.ts";
+import { buildHalfSheetTemplate } from "../pdf-generator/halfSheetTemplate.ts";
 import { loadPages } from "../../apps/cli/io/loadPages.ts";
 import type { GrayImage } from "./types.ts";
 import { existsSync, readFileSync } from "node:fs";
@@ -117,6 +118,59 @@ describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida", () =
       const incorrectas: string[] = [];
       for (const q of questions!) {
         const esperada = marks[String(q.ordinal)] ?? null;
+        if (q.state.kind === "ANSWERED" && q.state.option !== esperada) {
+          incorrectas.push(`Q${q.ordinal}: leyó ${q.state.option}, el alumno marcó ${esperada}`);
+        }
+        if (q.state.kind === "BLANK" && esperada !== null) {
+          incorrectas.push(`Q${q.ordinal}: leyó BLANCO, el alumno marcó ${esperada}`);
+        }
+      }
+      expect(incorrectas).toEqual([]);
+    });
+  }
+});
+
+/**
+ * Mismo chequeo que arriba, para hoja-media-a4 — la plantilla de
+ * producción desde ENGINE_VERSION 0.4.0 (ver la nota en analyzeSheet.ts).
+ * Los 2 escaneos reales que cerraron la Fase 2: código de alumno leído
+ * exacto, 0 auto-aceptadas incorrectas sobre 197 preguntas con verdad
+ * conocida (verificado también con apps/cli/evaluateHalfSheet.ts).
+ *
+ * NO reemplaza el describe de arriba — buildOfficialTemplate() sigue
+ * siendo el único activo de validación de la hoja de una A4 por alumno,
+ * y sigue siendo a dónde se vuelve si hoja-media-a4 fallara en producción.
+ */
+describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida (hoja-media-a4)", () => {
+  const hojas = [
+    ["dataset/hojas-escaneadas/Maria Ana Chavez.pdf", "ground-truth/maria-ana-chavez-escaneada.json"],
+    ["dataset/hojas-escaneadas/Juan Alejandro Perez.pdf", "ground-truth/juan-alejandro-perez-escaneada.json"],
+  ] as const;
+
+  for (const [foto, verdad] of hojas) {
+    // dataset/ está en .gitignore: en un clon limpio el escaneo no existe y
+    // el test se salta en vez de fallar por una razón que no es del código.
+    const hayFixture = existsSync(foto) && existsSync(verdad);
+    const nombre = foto.split("/").pop()!;
+
+    it.skipIf(!hayFixture)(`${nombre}: ninguna respuesta auto-aceptada contradice la verdad`, async () => {
+      const t = buildHalfSheetTemplate(100);
+      const img = (await loadPages(foto))[0]!;
+      const outcome = await analyzeSheet(img, t, 200, {});
+
+      const gt = JSON.parse(readFileSync(verdad, "utf8")) as {
+        marks: Record<string, string | null>;
+        studentCode: { columns: (string | null)[] };
+      };
+
+      expect(outcome.kind).toBe("processed");
+      if (outcome.kind !== "processed") return;
+
+      expect(outcome.result.studentId).toBe(gt.studentCode.columns.join(""));
+
+      const incorrectas: string[] = [];
+      for (const q of outcome.result.questions) {
+        const esperada = gt.marks[String(q.ordinal)] ?? null;
         if (q.state.kind === "ANSWERED" && q.state.option !== esperada) {
           incorrectas.push(`Q${q.ordinal}: leyó ${q.state.option}, el alumno marcó ${esperada}`);
         }

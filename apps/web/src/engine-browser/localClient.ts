@@ -20,14 +20,18 @@ import type { QuestionResult } from "../../../../packages/engine/scoring.ts";
 import type { ClassificationState } from "../../../../packages/engine/classification.ts";
 import type { Grade } from "../../../../packages/engine/grading.ts";
 import { projectSheet, computeBatchMetrics } from "../../../../packages/domain/sheetProjection.ts";
-import { buildOfficialTemplate } from "../../../../packages/pdf-generator/officialTemplate.ts";
+import { buildHalfSheetTemplate } from "../../../../packages/pdf-generator/halfSheetTemplate.ts";
 import type { StoredSheet } from "../../../api/storage/types.ts";
 import { IndexedDbRepository } from "./indexedDbRepository.ts";
 import { uploadFileLocal } from "./localUpload.ts";
 import { pngBlobToGrayImage, renderSheetImageUrl, buildReadingMarks } from "./sheetImageBrowser.ts";
 
 const DPI = 200;
-const template = buildOfficialTemplate(100);
+// Ver la nota de omrWorker.ts: hoja-media-a4 es la plantilla de producción
+// desde la Fase 2. Este `template` solo se usa acá para metadata del batch
+// (templateId/templateVersion) y para renderizar el overlay de burbujas en
+// la vista de revisión — no para clasificar nada, eso lo hace el worker.
+const template = buildHalfSheetTemplate(100);
 
 // Un solo repositorio para toda la pestaña — abrir IndexedDB tiene su propio
 // costo (primera apertura crea los almacenes) y no hay motivo para repetirlo

@@ -214,32 +214,28 @@ function rescueMissingCorner(
 }
 
 /**
- * @returns los 4 marcadores ordenados TL/TR/BR/BL, o null si no se pudo
- * armar un conjunto de 4 candidatos consistentes. Nunca "adivina" con 3.
+ * Núcleo de emparejamiento, extraído de lo que antes era el cuerpo de
+ * findFiducials(): dados los candidatos ya filtrados por forma y una
+ * referencia de 4 esquinas EN LAS COORDENADAS QUE SEAN, arma la asignación
+ * y valida tamaños. `refWidth`/`refHeight` alimentan solo el radio de
+ * rescate del 4to marcador (rescueMissingCorner) — no tienen que ser el
+ * tamaño de la imagen, tienen que ser el tamaño del rectángulo que estas
+ * `corners` describen.
+ *
+ * Se separó de findFiducials() al aparecer un SEGUNDO llamador real con una
+ * referencia de esquinas distinta (findFiducialsInContentBounds, más abajo)
+ * — antes de eso, threading esquinas como parámetro hubiera sido
+ * generalizar sin necesidad (PROMPT.md §5).
  */
-export function findFiducials(
-  blobs: Blob[], imageWidth: number, imageHeight: number,
-  solidityMin: number = SOLIDITY_MIN,
-  /**
-   * MEDIDO: con solidity relajado, los marcadores fragmentados que SÍ se
-   * aceptan traen área más chica que uno intacto (441-458px vs 1645-1924px
-   * en la misma foto — la fragmentación no solo afecta convexidad, también
-   * resta área real). MAX_AREA_RATIO=3 rechazaba esa foto aun habiendo
-   * encontrado los 4 marcadores correctos. Quien llama con solidity
-   * relajado debe pasar también un maxAreaRatio más permisivo.
-   */
-  maxAreaRatio: number = MAX_AREA_RATIO,
-  minArea: number = MIN_MARKER_AREA_PX
+function matchAgainstCorners(
+  candidates: Blob[],
+  corners: Record<CornerId, { x: number; y: number }>,
+  maxDistPx: number,
+  allBlobs: Blob[],
+  refWidth: number,
+  refHeight: number,
+  maxAreaRatio: number
 ): DetectedMarker[] | null {
-  const candidates = blobs.filter((b) => isSquareish(b, solidityMin, minArea));
-  const corners: Record<CornerId, { x: number; y: number }> = {
-    TL: { x: 0, y: 0 },
-    TR: { x: imageWidth, y: 0 },
-    BR: { x: imageWidth, y: imageHeight },
-    BL: { x: 0, y: imageHeight },
-  };
-  const maxDistPx = MAX_CORNER_DISTANCE_FRACTION * Math.hypot(imageWidth, imageHeight);
-
   const pairs: { id: CornerId; blob: Blob; dist: number }[] = [];
   for (const id of CORNER_IDS) {
     for (const c of candidates) {
@@ -266,7 +262,7 @@ export function findFiducials(
   }
 
   if (missing.length === 1) {
-    const rescued = rescueMissingCorner(missing[0]!, chosen, blobs, used, imageWidth, imageHeight);
+    const rescued = rescueMissingCorner(missing[0]!, chosen, allBlobs, used, refWidth, refHeight);
     if (rescued) {
       chosen[missing[0]!] = rescued;
       const full = chosen as Record<CornerId, Blob>;
@@ -275,6 +271,111 @@ export function findFiducials(
   }
 
   return null;
+}
+
+/**
+ * @returns los 4 marcadores ordenados TL/TR/BR/BL, o null si no se pudo
+ * armar un conjunto de 4 candidatos consistentes. Nunca "adivina" con 3.
+ */
+export function findFiducials(
+  blobs: Blob[], imageWidth: number, imageHeight: number,
+  solidityMin: number = SOLIDITY_MIN,
+  /**
+   * MEDIDO: con solidity relajado, los marcadores fragmentados que SÍ se
+   * aceptan traen área más chica que uno intacto (441-458px vs 1645-1924px
+   * en la misma foto — la fragmentación no solo afecta convexidad, también
+   * resta área real). MAX_AREA_RATIO=3 rechazaba esa foto aun habiendo
+   * encontrado los 4 marcadores correctos. Quien llama con solidity
+   * relajado debe pasar también un maxAreaRatio más permisivo.
+   */
+  maxAreaRatio: number = MAX_AREA_RATIO,
+  minArea: number = MIN_MARKER_AREA_PX
+): DetectedMarker[] | null {
+  const candidates = blobs.filter((b) => isSquareish(b, solidityMin, minArea));
+  const corners: Record<CornerId, { x: number; y: number }> = {
+    TL: { x: 0, y: 0 },
+    TR: { x: imageWidth, y: 0 },
+    BR: { x: imageWidth, y: imageHeight },
+    BL: { x: 0, y: imageHeight },
+  };
+  const maxDistPx = MAX_CORNER_DISTANCE_FRACTION * Math.hypot(imageWidth, imageHeight);
+  return matchAgainstCorners(candidates, corners, maxDistPx, blobs, imageWidth, imageHeight, maxAreaRatio);
+}
+
+/**
+ * ── Fallback para un canvas más grande que el papel real (MEDIDO, hojas
+ *    escaneadas 2026-09-14) ───────────────────────────────────────────────
+ *
+ * findFiducials() asume que el papel llena el encuadre: busca cada
+ * marcador cerca de la esquina correspondiente de LA IMAGEN. Eso vale para
+ * una foto de celular (el papel ocupa el encuadre) y para un escaneo bien
+ * configurado — pero no para un escáner que entrega un canvas de tamaño
+ * fijo (A4 completo, 210x297mm) más grande que el papel real alimentado
+ * (media hoja, 210x148.5mm), con el contenido pegado a un costado y el
+ * resto del canvas en blanco.
+ *
+ * MEDIDO en 2 escaneos reales (Epson Scan 2, canvas A4 con la media hoja
+ * pegada arriba): los 2 marcadores de abajo quedaban a ~1266px de la
+ * esquina real de la imagen — muy por fuera del radio de búsqueda (859px
+ * = MAX_CORNER_DISTANCE_FRACTION de la diagonal completa). Rechazo total
+ * (MARKERS_NOT_FOUND) en las 2, con los 4 marcadores intactos en el papel:
+ * confirmado recortando la imagen al alto real del contenido y volviendo a
+ * correr la detección sin cambiar nada más — encontró los 4 en las 2.
+ *
+ * LA IDEA: los 4 marcadores reales SIGUEN estando en `candidates` — pasan
+ * isSquareish() esté donde esté el papel dentro del canvas, porque ese
+ * filtro no mira posición. Lo único que falla es la REFERENCIA contra la
+ * que se mide la distancia. En vez de las 4 esquinas de la imagen
+ * completa, se usa el rectángulo que encierra a los propios candidatos: si
+ * el contenido real está pegado a un costado y sobra canvas del otro, ese
+ * rectángulo SÍ coincide con las 4 esquinas reales, venga o no venga el
+ * escaneo recortado al tamaño del papel — sin necesitar saber de antemano
+ * cuánto mide el papel de ningún template en particular.
+ *
+ * POR QUÉ ES SEGURO: findFiducialsRobust() solo prueba esto después de que
+ * los 4 intentos de siempre (2 métodos de umbral × solidity estricto o
+ * relajado) ya fallaron — ver más abajo. Ninguna hoja que hoy se lee bien
+ * puede verse afectada por este camino nuevo, porque nunca se llega a
+ * intentarlo. Y en el caso donde sí se intenta, sigue vigente el mismo
+ * chequeo de tamaños consistentes (areasConsistent) que ya descarta
+ * asignaciones geométricamente absurdas en el camino normal.
+ */
+function contentBoundingBox(candidates: Blob[]): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  // Con menos de 2 candidatos no hay de dónde sacar un rectángulo real —
+  // devolver un cuadrado degenerado sería peor que no intentar nada.
+  if (candidates.length < 2) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of candidates) {
+    minX = Math.min(minX, c.centroid.x);
+    minY = Math.min(minY, c.centroid.y);
+    maxX = Math.max(maxX, c.centroid.x);
+    maxY = Math.max(maxY, c.centroid.y);
+  }
+  if (maxX <= minX || maxY <= minY) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+function findFiducialsInContentBounds(
+  blobs: Blob[],
+  solidityMin: number,
+  maxAreaRatio: number,
+  minArea: number
+): DetectedMarker[] | null {
+  const candidates = blobs.filter((b) => isSquareish(b, solidityMin, minArea));
+  const box = contentBoundingBox(candidates);
+  if (!box) return null;
+
+  const corners: Record<CornerId, { x: number; y: number }> = {
+    TL: { x: box.minX, y: box.minY },
+    TR: { x: box.maxX, y: box.minY },
+    BR: { x: box.maxX, y: box.maxY },
+    BL: { x: box.minX, y: box.maxY },
+  };
+  const refWidth = box.maxX - box.minX;
+  const refHeight = box.maxY - box.minY;
+  const maxDistPx = MAX_CORNER_DISTANCE_FRACTION * Math.hypot(refWidth, refHeight);
+
+  return matchAgainstCorners(candidates, corners, maxDistPx, blobs, refWidth, refHeight, maxAreaRatio);
 }
 
 /**
@@ -331,6 +432,25 @@ export async function findFiducialsRobust(
   for (const { name, blobs } of attempts) {
     const markers = findFiducials(
       blobs, img.width, img.height, RELAXED_SOLIDITY_MIN, MAX_AREA_RATIO_RESCUED, RELAXED_MIN_MARKER_AREA_PX
+    );
+    if (markers) return { markers, method: name };
+  }
+
+  /**
+   * Canvas más grande que el papel real (ver la nota extensa de
+   * findFiducialsInContentBounds). Se prueba SOLO acá, después de que las
+   * 4 combinaciones de arriba ya fallaron contra las esquinas de la imagen
+   * completa — así que ninguna hoja que hoy se lee bien puede empezar a
+   * fallar por este cambio: para que este camino se ejecute siquiera, el
+   * camino de siempre ya tuvo que rechazar la hoja siendo llamado primero.
+   */
+  for (const { name, blobs } of attempts) {
+    const markers = findFiducialsInContentBounds(blobs, SOLIDITY_MIN, MAX_AREA_RATIO, MIN_MARKER_AREA_PX);
+    if (markers) return { markers, method: name };
+  }
+  for (const { name, blobs } of attempts) {
+    const markers = findFiducialsInContentBounds(
+      blobs, RELAXED_SOLIDITY_MIN, MAX_AREA_RATIO_RESCUED, RELAXED_MIN_MARKER_AREA_PX
     );
     if (markers) return { markers, method: name };
   }

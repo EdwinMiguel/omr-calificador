@@ -19,16 +19,18 @@ type Step = "empty" | "verify" | "active";
 const OPTIONS = ["A", "B", "C", "D", "E"];
 
 /**
- * La hoja real tiene las 100 preguntas en 4 columnas verticales de 25
- * (1-25, 26-50, 51-75, 76-100) — así la imprime `officialTemplate.ts`. La
- * grilla de la clave tiene que verse igual, o buscar "la pregunta 63" en
- * pantalla no coincide con dónde está en el papel que el profesor tiene
- * al lado. El array de datos se queda ordenado 1→100 (DOM y accesibilidad
- * no cambian); es solo la variable CSS la que le dice a `grid-auto-flow:
+ * La hoja real tiene las 100 preguntas en 5 columnas verticales de 20
+ * (1-20, 21-40, 41-60, 61-80, 81-100) — así la imprime `halfSheetTemplate.ts`,
+ * la plantilla de producción desde ENGINE_VERSION 0.4.0 (antes eran 4
+ * columnas de 25, el layout de `officialTemplate.ts`). La grilla de la
+ * clave tiene que verse igual, o buscar "la pregunta 63" en pantalla no
+ * coincide con dónde está en el papel que el profesor tiene al lado. El
+ * array de datos se queda ordenado 1→100 (DOM y accesibilidad no
+ * cambian); es solo la variable CSS la que le dice a `grid-auto-flow:
  * column` cuántas filas tiene cada columna antes de saltar a la próxima.
  */
 function keygridStyle(total: number): React.CSSProperties {
-  return { "--kg-rows": Math.ceil(total / 4) } as React.CSSProperties;
+  return { "--kg-rows": Math.ceil(total / 5) } as React.CSSProperties;
 }
 
 export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onChanged: () => void }) {

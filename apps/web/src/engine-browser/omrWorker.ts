@@ -33,7 +33,7 @@
  */
 
 import { analyzeSheet, type SheetOutcome } from "../../../../packages/engine/analyzeSheet.ts";
-import { buildOfficialTemplate } from "../../../../packages/pdf-generator/officialTemplate.ts";
+import { buildHalfSheetTemplate } from "../../../../packages/pdf-generator/halfSheetTemplate.ts";
 import { loadPagesBrowser } from "./loadPagesBrowser.ts";
 import type { AnswerKey } from "../../../../packages/engine/scoring.ts";
 
@@ -58,7 +58,14 @@ export type WorkerResponse =
 // La plantilla se construye una sola vez por worker, no por hoja: es
 // determinista y su costo (calcular ~570 posiciones) no tiene por qué
 // pagarse en cada página de un lote.
-const template = buildOfficialTemplate(100);
+//
+// hoja-media-a4 es LA plantilla de producción desde la Fase 2 (2 escaneos
+// reales, 0 auto-aceptadas incorrectas — ver evaluateHalfSheet.ts). La
+// oficial de una hoja por A4 (buildOfficialTemplate) NO se borra: sigue
+// siendo el único activo de validación con verdad conocida en
+// analyzeSheet.test.ts, y es a dónde se vuelve con este mismo cambio de
+// 3 líneas si la media hoja fallara en producción.
+const template = buildHalfSheetTemplate(100);
 
 const post = (msg: WorkerResponse): void => self.postMessage(msg);
 
