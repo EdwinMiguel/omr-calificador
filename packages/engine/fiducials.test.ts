@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findFiducials } from "./fiducials.ts";
+import { findFiducials, findFiducialsRobust } from "./fiducials.ts";
 import { findBlobs } from "./blobs.ts";
 import type { GrayImage } from "./types.ts";
 
@@ -149,5 +149,105 @@ describe("findFiducials", () => {
     const img: GrayImage = { data, width: w, height: h };
     const blobs = await findBlobs(img);
     expect(findFiducials(blobs, w, h)).toBeNull();
+  });
+});
+
+describe("findFiducialsRobust — canvas más grande que el papel real", () => {
+  /**
+   * Reproduce el caso real medido en 2026-09-14: un escáner entrega un
+   * canvas de tamaño fijo (A4 completo) más grande que el papel real
+   * alimentado (media hoja), con el contenido pegado a un costado y el
+   * resto del canvas en blanco. Acá: canvas 400x1200 (3x más alto que el
+   * contenido), con las 4 marcadores dentro de los primeros ~400px —
+   * misma proporción de sobra de canvas que la de los escaneos reales
+   * (~1.9x) pero exagerada para que el test sea decisivo sin depender de
+   * constantes finas.
+   */
+  it("encuentra los 4 marcadores cuando el contenido no llena el canvas", async () => {
+    const w = 400, h = 1200;
+    const data = new Uint8Array(w * h);
+    drawSquare(data, w, 10, 10, 30);    // TL
+    drawSquare(data, w, 360, 10, 30);   // TR
+    drawSquare(data, w, 360, 360, 30);  // BR
+    drawSquare(data, w, 10, 360, 30);   // BL
+    // el resto del canvas (y > 400) queda en blanco, como el papel de
+    // sobra que deja un escáner en modo "página A4 fija".
+
+    const img: GrayImage = { data, width: w, height: h };
+    // Primero se confirma que el camino de SIEMPRE (esquinas de la imagen
+    // completa) efectivamente falla acá — si no, el test no prueba nada.
+    const blobs = await findBlobs(img);
+    expect(findFiducials(blobs, w, h)).toBeNull();
+
+    const result = await findFiducialsRobust(img);
+    expect(result).not.toBeNull();
+    expect(result!.markers.map((m) => m.id)).toEqual(["TL", "TR", "BR", "BL"]);
+    const tl = result!.markers.find((m) => m.id === "TL")!;
+    expect(tl.centerPx.x).toBeCloseTo(25, 0);
+    expect(tl.centerPx.y).toBeCloseTo(25, 0);
+  });
+
+  it("sigue sin inventar un 4to marcador aunque el canvas tenga espacio de sobra", async () => {
+    // Mismo canvas con sobra, pero de verdad falta un marcador (no
+    // degradado, ausente) — el fallback nuevo tiene que seguir respetando
+    // "nunca adivinar con 3", igual que findFiducials() en el camino de
+    // siempre.
+    const w = 400, h = 1200;
+    const data = new Uint8Array(w * h);
+    drawSquare(data, w, 10, 10, 30);
+    drawSquare(data, w, 360, 10, 30);
+    drawSquare(data, w, 360, 360, 30);
+    // BL ausente.
+
+    const img: GrayImage = { data, width: w, height: h };
+    const result = await findFiducialsRobust(img);
+    expect(result).toBeNull();
+  });
+
+  /**
+   * El primer test solo prueba relleno ABAJO (contenido pegado arriba-
+   * izquierda). contentBoundingBox() calcula min/max de x e y por
+   * separado, así que en teoría no le importa de qué lado sobra canvas —
+   * este test verifica esa generalización con sobra en 3 de los 4 lados a
+   * la vez (arriba, derecha y abajo), no solo la asumida por el bug real.
+   */
+  it("encuentra los 4 marcadores con el contenido centrado, sobrando canvas en varios lados", async () => {
+    const w = 1000, h = 1000;
+    const data = new Uint8Array(w * h);
+    // Contenido corrido hacia la esquina inferior-izquierda: sobra canvas
+    // arriba (y<300), a la derecha (x>700) y abajo un poco menos.
+    drawSquare(data, w, 300, 300, 30);  // TL
+    drawSquare(data, w, 650, 300, 30);  // TR
+    drawSquare(data, w, 650, 650, 30);  // BR
+    drawSquare(data, w, 300, 650, 30);  // BL
+
+    const img: GrayImage = { data, width: w, height: h };
+    const blobs = await findBlobs(img);
+    expect(findFiducials(blobs, w, h)).toBeNull(); // confirma que hace falta el fallback
+
+    const result = await findFiducialsRobust(img);
+    expect(result).not.toBeNull();
+    expect(result!.markers.map((m) => m.id)).toEqual(["TL", "TR", "BR", "BL"]);
+    const bl = result!.markers.find((m) => m.id === "BL")!;
+    expect(bl.centerPx.x).toBeCloseTo(315, 0);
+    expect(bl.centerPx.y).toBeCloseTo(665, 0);
+  });
+
+  it("sigue resolviendo el caso normal (contenido llena el canvas) sin pasar por el fallback", async () => {
+    // No es un test nuevo de comportamiento — es la confirmación de que
+    // agregar los intentos nuevos en findFiducialsRobust() no le cambió el
+    // resultado al caso de siempre, llamando por la función pública que de
+    // verdad usa el resto del motor (geometry.ts), no solo findFiducials().
+    const w = 400, h = 400;
+    const data = new Uint8Array(w * h);
+    drawSquare(data, w, 10, 10, 30);
+    drawSquare(data, w, 360, 10, 30);
+    drawSquare(data, w, 360, 360, 30);
+    drawSquare(data, w, 10, 360, 30);
+
+    const img: GrayImage = { data, width: w, height: h };
+    const result = await findFiducialsRobust(img);
+    expect(result).not.toBeNull();
+    expect(result!.markers.map((m) => m.id)).toEqual(["TL", "TR", "BR", "BL"]);
   });
 });

@@ -358,7 +358,7 @@ td.num, th.num { text-align: right; }
 .resolve-panel { padding: 18px 20px; min-width: 0; }
 
 .sheet-frame { position: relative; background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 3px; padding: 14px; }
-.sheet-frame canvas { display: block; width: 100%; height: auto; }
+.sheet-frame canvas, .sheet-frame img { display: block; width: 100%; height: auto; }
 /* Marcas de registro — eco de los fiduciales reales de la hoja */
 .sheet-frame::before, .sheet-frame::after {
   content: ""; position: absolute; width: 11px; height: 11px; border: 1.5px solid var(--pencil); opacity: .5;
@@ -401,8 +401,9 @@ td.num, th.num { text-align: right; }
 }
 
 /* ─── Clave ─────────────────────────────────────────────── */
-/* 4 columnas verticales de 25, igual que la hoja física impresa (ver
-   comentario de keygridStyle() en AnswerKeyView.tsx). --kg-rows lo fija
+/* 5 columnas verticales de 20, igual que la hoja física impresa (ver
+   comentario de keygridStyle() en AnswerKeyView.tsx — hoja-media-a4 desde
+   ENGINE_VERSION 0.4.0, antes eran 4 columnas de 25). --kg-rows lo fija
    cada vista según cuántas preguntas tiene en total.
 
    El mínimo de columna es 176px, no un número redondo: es el ancho MEDIDO
@@ -411,16 +412,27 @@ td.num, th.num { text-align: right; }
    desborda de su columna. */
 .keygrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(176px, 1fr));
-  grid-template-rows: repeat(var(--kg-rows, 25), auto);
+  grid-template-columns: repeat(5, minmax(176px, 1fr));
+  grid-template-rows: repeat(var(--kg-rows, 20), auto);
   grid-auto-flow: column;
   gap: 3px;
 }
-/* 4 columnas de 176px + separaciones necesitan ~713px de contenedor, o sea
-   ~780px de ventana. Por debajo se abandona el calco de la hoja física y se
-   deja que las columnas se acomoden solas: que entre en pantalla importa
-   más que espejar el papel. */
-@media (max-width: 800px) {
+/* 5 columnas de 176px + separaciones necesitan ~892px de contenedor. Por
+   debajo de eso se abandona el calco de la hoja física y se deja que las
+   columnas se acomoden solas: que entre en pantalla importa más que
+   espejar el papel.
+
+   MEDIDO en navegador real (Playwright), no calculado a ojo: con la
+   plantilla vieja (4 columnas, ~713px de contenedor) 800px de ventana
+   alcanzaba de sobra. Con 5 columnas hace falta bastante más — y no de
+   forma lineal, porque a los 900px el sidebar (.rail, más abajo) pasa de
+   fijo a horizontal y le devuelve de golpe su ancho al contenido: por
+   debajo de 900px hay MÁS lugar para el grid que un poco por encima. El
+   punto real donde 5 columnas dejan de desbordar con el sidebar fijo,
+   medido con document.documentElement.scrollWidth, cae entre 1170 y
+   1180px — 1200 dejando margen. Por debajo de eso, el modo auto-fill de
+   acá abajo ya se encarga, sidebar colapsado o no. */
+@media (max-width: 1200px) {
   .keygrid {
     grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
     grid-template-rows: none;
@@ -529,6 +541,9 @@ td.num, th.num { text-align: right; }
 .bc-seg--ok { background: var(--ok); }
 .bc-seg--review { background: var(--review); }
 .bc-seg--bad { background: var(--bad); }
+/* Sin contestar: gris neutro a propósito — no es un acierto ni un error ni
+   una duda, es una pregunta que el alumno dejó vacía. */
+.bc-seg--blank { background: var(--ink-muted); }
 
 @media (max-width: 1080px) {
   .resolve { grid-template-columns: 1fr; }
@@ -564,6 +579,24 @@ td.num, th.num { text-align: right; }
 .code-input { width: 100px; letter-spacing: .12em; text-align: center; }
 .keytext { width: 100%; resize: vertical; line-height: 1.7; letter-spacing: .08em; }
 .code-input:focus-visible, .keytext:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 1px; }
+
+/* Formulario de GenerateSheet.tsx — pila vertical simple: con 3 campos no
+   hace falta una grilla con breakpoints, y una columna es responsive gratis
+   en cualquier ancho, celular incluido. */
+.fieldgrid { display: flex; flex-direction: column; gap: 14px; max-width: 420px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-family: var(--sans); font-size: var(--t-xs); font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-muted); }
+.field-input {
+  font-family: var(--sans);
+  font-size: var(--t-bd);
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+.field-input:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 1px; }
+.generate-preview { margin-top: 16px; padding: 10px 12px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: var(--t-sm); }
 
 select.btn { appearance: none; padding-right: 26px; background-image: none; max-width: 220px; }
 .method:disabled { opacity: .5; cursor: wait; }

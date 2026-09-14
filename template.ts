@@ -107,6 +107,68 @@ export function canonicalMarkers(t: Template, dpi: number): PointMm[] {
   });
 }
 
+/**
+ * Rectángulo (mm) que envuelve las burbujas de uno o varios grupos, con
+ * margen. Dos usos reales, mismo cálculo: recortar la imagen alineada a la
+ * zona de una pregunta para mostrarla en la revisión manual (varios
+ * grupos, la pregunta bajo revisión + sus vecinas), y resaltar con un
+ * marco el grupo exacto que se está mirando (un solo grupo). `null` si
+ * `groups` viene vacío — no hay nada que envolver.
+ */
+export function groupsBoundingBoxMm(
+  groups: readonly BubbleGroup[], bubbleDiameterMm: number, marginMm: number
+): RectMm | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const g of groups) {
+    for (const b of g.bubbles) {
+      minX = Math.min(minX, b.center.x);
+      minY = Math.min(minY, b.center.y);
+      maxX = Math.max(maxX, b.center.x);
+      maxY = Math.max(maxY, b.center.y);
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  const r = bubbleDiameterMm / 2;
+  return {
+    x: minX - r - marginMm,
+    y: minY - r - marginMm,
+    w: maxX - minX + 2 * (r + marginMm),
+    h: maxY - minY + 2 * (r + marginMm),
+  };
+}
+
+/**
+ * Preguntas "vecinas" de `ordinal` para dar contexto en la revisión manual
+ * (± `maxDistance`), restringidas a la MISMA COLUMNA — no solo al mismo
+ * rango de ordinales.
+ *
+ * MEDIDO (a mano, no en runtime, al diseñar el recorte de useReviewImageUrl
+ * en localClient.ts): con 20 preguntas por columna (hoja-media-a4), la
+ * pregunta 21 vive en la columna SIGUIENTE a la 20 — mucho más lejos en x
+ * que en y. Sin este filtro, pedir "ordinal 18 a 22" cerca del borde de una
+ * columna arma un rectángulo que abarca de una columna a la otra, con la
+ * mitad de la hoja vacía en el medio — el recorte más inútil posible para
+ * lo que se necesita mostrar. Se filtra por "misma x que la burbuja A de la
+ * pregunta actual" (con tolerancia, no igualdad exacta de floats) además
+ * de por ordinal.
+ *
+ * No asume "N preguntas por columna" de ningún template en particular —
+ * se deriva de la geometría real, así que sigue funcionando si el layout
+ * de columnas cambia.
+ */
+export function sameColumnNeighbours(
+  groups: readonly BubbleGroup[], ordinal: number, maxDistance: number, toleranceMm = 1
+): BubbleGroup[] {
+  const current = groups.find((g) => g.kind === "question" && g.ordinal === ordinal);
+  const currentX = current?.bubbles[0]?.center.x;
+  return groups.filter((g) => {
+    if (g.kind !== "question" || Math.abs(g.ordinal - ordinal) > maxDistance) return false;
+    if (currentX === undefined) return true; // sin referencia de columna, no filtrar por x
+    const gx = g.bubbles[0]?.center.x;
+    return gx !== undefined && Math.abs(gx - currentX) <= toleranceMm;
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // Construcción de la plantilla v1
 // ─────────────────────────────────────────────────────────────

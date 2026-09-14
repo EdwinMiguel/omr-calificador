@@ -44,15 +44,18 @@ export interface Grade {
   /** Preguntas que efectivamente contaron (total menos las anuladas). */
   effectiveQuestions: number;
   /**
-   * Preguntas que TODAVÍA esperan que una persona decida algo.
+   * Preguntas que TODAVÍA esperan que una persona decida algo: el motor vio
+   * algo que no supo leer (AMBIGUOUS/MULTIPLE) y nadie lo resolvió.
    *
    * "Pendiente" es "nadie la resolvió" — no es lo mismo que "el estado no
-   * es ANSWERED". Mismo bug que se encontró y corrigió en
-   * `sheetProjection.ts::pendingOrdinals` (una pregunta genuinamente en
-   * blanco, confirmada como tal por una persona, no debe seguir apareciendo
-   * como pendiente para siempre), corregido acá también: no bastaba con
-   * arreglarlo en un solo lugar porque son dos cálculos independientes que
-   * miran los mismos datos.
+   * es ANSWERED". Una pregunta EN BLANCO no es una duda: es una respuesta
+   * ("no contestó"), vale 0 puntos y no bloquea la nota. Ver la nota
+   * extensa de `sheetProjection.ts::pendingOrdinals`, incluido por qué la
+   * guarda de blanco hace que esto sea seguro.
+   *
+   * Son dos cálculos independientes sobre los mismos datos (acá y en
+   * sheetProjection.ts): arreglar uno solo no alcanza, tienen que cambiar
+   * los dos juntos o las cuentas de pantalla se contradicen entre sí.
    */
   pendingReview: number;
   rule: GradingRule;
@@ -77,7 +80,9 @@ export function computeGrade(
   // que `!r.corrected` da `true` igual, que es el valor correcto para ese
   // caso). Solo sheetProjection.ts, que sabe qué corrigió una persona,
   // pasa el campo con un valor real.
-  const pendingReview = counted.filter((r) => r.correct === null && !r.corrected).length;
+  const pendingReview = counted.filter(
+    (r) => r.correct === null && r.state.kind !== "BLANK" && !r.corrected
+  ).length;
 
   const effectiveQuestions = counted.length;
   if (effectiveQuestions === 0) {

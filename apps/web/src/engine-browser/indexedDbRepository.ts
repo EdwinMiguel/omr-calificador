@@ -114,6 +114,67 @@ export class IndexedDbRepository implements Repository {
     return found ?? null;
   }
 
+  /**
+   * Renombrar y borrar viven FUERA de `Repository` a propósito, mismo
+   * criterio que putSheetImage/getSheetImage más abajo: el servidor
+   * (apps/api/storage/fileRepo.ts) es un log JSONL append-only por diseño —
+   * "borrar un lote" ahí sería otra operación, con otras implicaciones de
+   * auditoría — y ningún camino activo de la app lo usa hoy (server.ts no
+   * está conectado a ninguna vista). Agregar acá una forma que nadie llama
+   * del otro lado sería generalizar sin necesidad (PROMPT.md §5).
+   */
+  async renameBatch(id: string, label: string): Promise<void> {
+    const db = await this.db();
+    const batch = await this.getBatch(id);
+    if (!batch) throw new Error("Lote no encontrado");
+    await tx(db, STORES.batches, "readwrite", (s) => s.put({ ...batch, label }));
+  }
+
+  /**
+   * Borra el lote Y TODO lo que cuelga de él: hojas, claves de respuestas,
+   * correcciones e imágenes. Sin cascada manual, borrar solo el registro de
+   * `batches` dejaría el resto huérfano ocupando espacio en IndexedDB para
+   * siempre, sin ningún lote que lo referencie ni forma de encontrarlo desde
+   * la UI.
+   *
+   * UNA SOLA TRANSACCIÓN sobre los 5 almacenes, no un borrado por partes: o
+   * se borra el lote completo o no se borra nada. Sin esto, una falla a
+   * mitad de camino (ej. la pestaña se cierra) podría dejar el lote borrado
+   * pero sus imágenes todavía ahí, o viceversa — un estado a medias que
+   * nadie puede ver ni arreglar desde la interfaz.
+   */
+  async deleteBatch(id: string): Promise<void> {
+    const db = await this.db();
+    const sheets = await this.listSheets(id);
+    const sheetIds = sheets.map((s) => s.id);
+
+    // correcciones y claves no tienen índice por LOTE directo (viven bajo
+    // sheetId / tienen su propio índice por batchId cada una) — se listan
+    // antes de abrir la transacción de borrado, para saber qué ids tocan.
+    const correctionIds: string[] = [];
+    for (const sheetId of sheetIds) {
+      const cs = await this.listCorrections(sheetId);
+      correctionIds.push(...cs.map((c) => c.id));
+    }
+    const keyIds = (await this.listAnswerKeys(id)).map((k) => k.id);
+
+    await new Promise<void>((resolve, reject) => {
+      const t = db.transaction(
+        [STORES.batches, STORES.sheets, STORES.answerKeys, STORES.corrections, STORES.images],
+        "readwrite"
+      );
+      t.objectStore(STORES.batches).delete(id);
+      for (const sheetId of sheetIds) {
+        t.objectStore(STORES.sheets).delete(sheetId);
+        t.objectStore(STORES.images).delete(sheetId);
+      }
+      for (const keyId of keyIds) t.objectStore(STORES.answerKeys).delete(keyId);
+      for (const cId of correctionIds) t.objectStore(STORES.corrections).delete(cId);
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+    });
+  }
+
   // ── Hojas ────────────────────────────────────────────────────────────
 
   async findSheetByHash(batchId: string, fileHash: string, pageIndex: number): Promise<StoredSheet | null> {

@@ -74,6 +74,7 @@ export const UI = {
 
   nav: {
     process: "Procesar",
+    generate: "Generar hoja",
     upload: "Cargar hojas",
     results: "Resultados",
     resolve: "Resolver",
@@ -84,13 +85,33 @@ export const UI = {
     metrics: "Métricas",
   },
 
+  generate: {
+    title: "Generar hoja",
+    lead: "Cada mitad de A4 es la hoja privada de un alumno. Completa los tres campos y descarga el PDF listo para imprimir — quedan recordados para la próxima vez.",
+    formHeading: "Datos del examen",
+    institucionLabel: "Institución",
+    institucionPlaceholder: "I.E. San Martín",
+    cursoLabel: "Curso",
+    cursoPlaceholder: "Comunicación",
+    tipoExamenLabel: "Tipo de examen",
+    tipoExamenPlaceholder: "Examen bimestral",
+    button: "Generar y descargar PDF",
+    needAllFields: "Completa los tres campos para generar la hoja.",
+    downloaded: (fileName: string) => `Descargado: ${fileName}`,
+    cutWarningTitle: "Corta por la línea punteada antes de repartir.",
+    cutWarningBody:
+      "El PDF trae DOS hojas en una A4 — una para cada alumno. Si se escanea o fotografía sin cortar, el sistema " +
+      "la rechaza con un mensaje de código ilegible que no tiene nada que ver con el problema real: lo que faltó " +
+      "fue el corte, no el código.",
+    printHint: "Imprime al 100% de tamaño real — sin \"ajustar a página\" — o el motor no va a reconocer las coordenadas.",
+  },
+
   upload: {
     title: "Cargar hojas",
     lead: "Arrastra los archivos del escáner. Cada archivo se identifica por su huella digital: si una hoja ya se procesó, se reconoce y no se vuelve a calificar.",
     templateHeading: "¿Todavía no imprimiste las hojas?",
     templateBody: "El sistema solo lee ESTA hoja: sus marcadores y sus burbujas están en coordenadas fijas que el motor ya conoce. Cualquier otra plantilla, aunque tenga las mismas 100 preguntas, no se va a leer.",
-    templateDownload: "Descargar hoja oficial (PDF)",
-    templatePrintHint: "Imprime al 100% de tamaño real — sin \"ajustar a página\".",
+    templateGoToGenerate: "Generar hoja",
     dropTitle: "Suelta aquí las hojas escaneadas",
     dropSub: "o haz clic para elegir archivos",
     // TIFF ya no se anuncia: el motor corre en el navegador y ningún
@@ -143,6 +164,11 @@ export const UI = {
     keyboardHint: "elegir",
     keyboardConfirm: "confirmar",
     thresholds: { blank: "en blanco <", mark: "marca ≥", margin: "margen mín." },
+    batchTitle: "Confirmar por lote — esta hoja",
+    batchLead: "La opción más oscura de cada pregunta, solo cuando se despega con claridad de las demás. Revisá la lista antes de confirmar: seguís siendo vos quien decide, no el sistema.",
+    batchNone: "Ninguna pendiente de esta hoja tiene un ganador lo bastante claro — revisalas una por una abajo.",
+    batchConfirm: (n: number) => `Confirmar ${n} seleccionada${n === 1 ? "" : "s"}`,
+    batchNoSuggestion: "sin ganador claro",
   },
 
   rejected: {
@@ -232,6 +258,8 @@ export const UI = {
     autoIncorrect: "Auto-aceptadas incorrectas",
     autoIncorrectNote: "el objetivo del sistema",
     autoCorrect: "Auto-aceptadas correctas",
+    autoBlank: "Sin contestar",
+    autoBlankNote: "cuentan 0 y no van a revisión",
     toReview: "Enviadas a revisión",
     rejectedSheets: "Hojas rechazadas",
     rejectedNote: "sin contar reversos en blanco",
@@ -265,5 +293,11 @@ export const UI = {
     batchName: "Nombre del lote",
     createBatch: "Crear lote",
     noBatch: "Crea un lote para empezar a cargar hojas.",
+    renameBatch: "Renombrar",
+    renameBatchPrompt: "Nuevo nombre del lote",
+    deleteBatch: "Borrar lote",
+    confirmDeleteBatch: (label: string, sheets: number) =>
+      `¿Borrar "${label}"? Se pierden las ${sheets} hoja${sheets === 1 ? "" : "s"} cargadas, la clave de respuestas ` +
+      "y todas las correcciones. Esto no se puede deshacer.",
   },
 } as const;

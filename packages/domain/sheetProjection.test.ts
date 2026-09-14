@@ -8,6 +8,12 @@ const answered = (ordinal: number, option: string): QuestionResult => ({
 const ambiguous = (ordinal: number): QuestionResult => ({
   ordinal, state: { kind: "AMBIGUOUS" }, correct: null,
 });
+const blank = (ordinal: number): QuestionResult => ({
+  ordinal, state: { kind: "BLANK" }, correct: null,
+});
+const multiple = (ordinal: number, options: string[]): QuestionResult => ({
+  ordinal, state: { kind: "MULTIPLE", options }, correct: null,
+});
 
 describe("projectSheet", () => {
   it("sin clave no inventa aciertos: todo queda sin calificar", () => {
@@ -105,6 +111,62 @@ describe("projectSheet", () => {
     expect(p.score.total).toBe(1);
     expect(p.pendingOrdinals).toEqual([]);
     expect(p.grade!.value).toBe(20);
+  });
+
+  it(
+    "una pregunta que el MOTOR dio por vacía tampoco es pendiente — sin contestar " +
+    "no es una duda, es una respuesta que vale 0. Antes bloqueaba la nota hasta " +
+    "que alguien confirmara a mano lo evidente, una por una",
+    () => {
+      const p = projectSheet(
+        { studentId: "7", questions: [answered(1, "B"), blank(2)] },
+        [], { 1: "B", 2: "A" }
+      );
+      expect(p.pendingOrdinals).toEqual([]);
+      expect(p.blankOrdinals).toEqual([2]);
+    }
+  );
+
+  it(
+    "LA LÍNEA QUE NO SE CRUZA: ambiguas y dobles marcas SIGUEN siendo pendientes. " +
+    "Ahí el motor vio algo y no supo qué era — darlas por no contestadas le " +
+    "quitaría al alumno un punto que quizás ganó",
+    () => {
+      const p = projectSheet(
+        { studentId: "7", questions: [blank(1), ambiguous(2), multiple(3, ["A", "C"])] },
+        [], { 1: "A", 2: "B", 3: "C" }
+      );
+      expect(p.pendingOrdinals).toEqual([2, 3]);
+      expect(p.blankOrdinals).toEqual([1]);
+    }
+  );
+
+  it(
+    "la nota sale con preguntas en blanco sin esperar a nadie, y las cuenta como 0: " +
+    "2 de 4 correctas con 2 vacías es 10, no 20 sobre las contestadas",
+    () => {
+      const p = projectSheet(
+        { studentId: "7", questions: [answered(1, "A"), answered(2, "B"), blank(3), blank(4)] },
+        [], { 1: "A", 2: "B", 3: "C", 4: "D" }
+      );
+      expect(p.pendingOrdinals).toEqual([]);
+      expect(p.grade!.value).toBe(10);
+      expect(p.grade!.effectiveQuestions).toBe(4); // las vacías siguen en el denominador
+      expect(p.grade!.pendingReview).toBe(0);
+    }
+  );
+
+  it("las cuatro categorías siguen sumando el total con blancos automáticos mezclados", () => {
+    const p = projectSheet(
+      {
+        studentId: "7",
+        questions: [answered(1, "B"), answered(2, "X"), blank(3), ambiguous(4)],
+      },
+      [], { 1: "B", 2: "C", 3: "A", 4: "D" }
+    );
+    const suma =
+      p.score.correct + p.score.incorrect + p.blankOrdinals.length + p.pendingOrdinals.length;
+    expect(suma).toBe(p.score.total);
   });
 });
 

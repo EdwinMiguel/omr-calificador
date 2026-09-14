@@ -66,4 +66,25 @@ describe("computeGrade", () => {
     expect(computeGrade([q(1, true)]).rule.id).toBe("proporcional-simple");
     expect(computeGrade([q(1, true)]).rule.version).toBe("1.0.0");
   });
+
+  it(
+    "una pregunta que el motor dio por vacía no queda pendiente: vale 0, sigue en " +
+    "el denominador, y la nota sale sin esperar a que nadie confirme nada",
+    () => {
+      const enBlanco = (ordinal: number): QuestionResult => ({
+        ordinal, state: { kind: "BLANK" }, correct: null,
+      });
+      const results = [q(1, true), q(2, true), enBlanco(3), enBlanco(4)];
+      const g = computeGrade(results);
+      expect(g.pendingReview).toBe(0);
+      expect(g.value).toBe(10); // 2 de 4, no 20 sobre las 2 contestadas
+      expect(g.effectiveQuestions).toBe(4);
+    }
+  );
+
+  it("pero una ambigua sigue contando como pendiente, junto a las vacías que ya no", () => {
+    const enBlanco: QuestionResult = { ordinal: 3, state: { kind: "BLANK" }, correct: null };
+    const g = computeGrade([q(1, true), q(2, null), enBlanco]);
+    expect(g.pendingReview).toBe(1); // solo la ambigua
+  });
 });

@@ -20,14 +20,19 @@ import type { QuestionResult } from "../../../../packages/engine/scoring.ts";
 import type { ClassificationState } from "../../../../packages/engine/classification.ts";
 import type { Grade } from "../../../../packages/engine/grading.ts";
 import { projectSheet, computeBatchMetrics } from "../../../../packages/domain/sheetProjection.ts";
-import { buildOfficialTemplate } from "../../../../packages/pdf-generator/officialTemplate.ts";
+import { buildHalfSheetTemplate } from "../../../../packages/pdf-generator/halfSheetTemplate.ts";
+import { groupsBoundingBoxMm, sameColumnNeighbours } from "../../../../template.ts";
 import type { StoredSheet } from "../../../api/storage/types.ts";
 import { IndexedDbRepository } from "./indexedDbRepository.ts";
 import { uploadFileLocal } from "./localUpload.ts";
 import { pngBlobToGrayImage, renderSheetImageUrl, buildReadingMarks } from "./sheetImageBrowser.ts";
 
 const DPI = 200;
-const template = buildOfficialTemplate(100);
+// Ver la nota de omrWorker.ts: hoja-media-a4 es la plantilla de producción
+// desde la Fase 2. Este `template` solo se usa acá para metadata del batch
+// (templateId/templateVersion) y para renderizar el overlay de burbujas en
+// la vista de revisión — no para clasificar nada, eso lo hace el worker.
+const template = buildHalfSheetTemplate(100);
 
 // Un solo repositorio para toda la pestaña — abrir IndexedDB tiene su propio
 // costo (primera apertura crea los almacenes) y no hay motivo para repetirlo
@@ -113,6 +118,7 @@ export interface BatchMetrics {
   rejectionsByReason: Record<string, number>;
   autoAcceptedCorrect: number;
   autoAcceptedIncorrect: number;
+  autoAcceptedBlank: number;
   sentToReview: number;
   averageGrade: number | null;
 }
@@ -250,6 +256,16 @@ export function useSheet(id: string | null): Async<{ sheet: unknown; projected: 
 
 export function createBatch(label: string): Promise<Batch> {
   return repo.createBatch({ label, templateId: template.id, templateVersion: template.version });
+}
+
+export function renameBatch(id: string, label: string): Promise<void> {
+  return repo.renameBatch(id, label);
+}
+
+/** Borra el lote y todo lo que cuelga de él (hojas, claves, correcciones,
+ * imágenes) — ver la nota extensa en indexedDbRepository.ts::deleteBatch. */
+export function deleteBatch(id: string): Promise<void> {
+  return repo.deleteBatch(id);
 }
 
 export interface UploadResult {
@@ -430,12 +446,67 @@ export function useSheetImageUrl(
       marks = buildReadingMarks(projected?.questions ?? []);
     }
 
-    return renderSheetImageUrl(aligned, template, DPI, marks, width);
+    return renderSheetImageUrl(aligned, template, DPI, marks, { targetWidth: width });
   }, [sheetId, overlay, width]);
 
   // Se guarda la URL previa para revocarla en cuanto haya una nueva (o al
   // desmontar) — un useEffect aparte porque `result.data` cambia después de
   // que useAsync ya resolvió, no durante el render.
+  useEffect(() => {
+    return () => result.data?.revoke();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result.data?.url]);
+
+  return { ...result, data: result.data?.url ?? null };
+}
+
+/**
+ * Recorte fotográfico REAL alrededor de una pregunta, para la revisión
+ * manual — no la representación sintética que dibujaba SheetCanvas (ver su
+ * "PENDIENTE CONOCIDO", ahora resuelto). Mismo motivo que useSheetImageUrl
+ * (PROMPT.md §8, "salida visual siempre"), pero acá SIEMPRE con overlay y
+ * SIEMPRE recortado a la zona de la pregunta — no hay toggle: en revisión
+ * uno quiere ver la marca real cuanto antes, no elegir primero.
+ *
+ * CROP_CONTEXT_MM (6mm, bastante más que el margen de foco de 1.4mm en
+ * readingOverlay.ts): ese margen es "no tapar la burbuja", este es "que se
+ * note que hay preguntas alrededor" — sin esto el recorte quedaría pegado
+ * al borde de la primera/última fila vecina, sin aire.
+ */
+const CROP_CONTEXT_MM = 6;
+/** Cuántas preguntas antes/después de la que está en revisión se incluyen
+ * en el recorte — mismo criterio que ya usaba neighbourhood() en
+ * Review.tsx para el canvas sintético: contexto sin volverse ilegible. */
+const CROP_NEIGHBOURS = 2;
+
+export function useReviewImageUrl(
+  sheetId: string | null,
+  ordinal: number | null,
+  width?: number
+): Async<string> {
+  const result = useAsync(async () => {
+    if (!sheetId || ordinal === null) return null as never;
+
+    const png = await repo.getSheetImage(sheetId);
+    if (!png) throw new Error("Esta hoja no se pudo enderezar para mostrarla");
+    const aligned = await pngBlobToGrayImage(png);
+
+    const sheet = await repo.getSheet(sheetId);
+    const projected = sheet ? await project(sheet) : null;
+    const marks = buildReadingMarks(projected?.questions ?? []);
+
+    // Ver sameColumnNeighbours() en template.ts: ordinal±2 sin más cruzaría
+    // de columna cerca de un borde (18-22 con 20 preguntas por columna).
+    const neighbourGroups = sameColumnNeighbours(template.groups, ordinal, CROP_NEIGHBOURS);
+    const cropRectMm = groupsBoundingBoxMm(neighbourGroups, template.bubbleDiameterMm, CROP_CONTEXT_MM);
+
+    return renderSheetImageUrl(aligned, template, DPI, marks, {
+      targetWidth: width,
+      cropRectMm: cropRectMm ?? undefined,
+      focusGroupId: `q.${ordinal}`,
+    });
+  }, [sheetId, ordinal, width]);
+
   useEffect(() => {
     return () => result.data?.revoke();
     // eslint-disable-next-line react-hooks/exhaustive-deps
