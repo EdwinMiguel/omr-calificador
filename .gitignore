@@ -6,3 +6,6 @@ apps/web/dist/
 .DS_Store
 dataset/
 .claude/settings.local.json
+PROMPT.md
+PLAN-15-DIAS.md
+ground-truth/
