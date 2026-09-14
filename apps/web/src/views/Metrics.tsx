@@ -18,7 +18,10 @@ const THRESHOLDS = [
 
 export function Metrics({ detail }: { detail: BatchDetail }) {
   const m = detail.metrics;
-  const totalAnswers = m.autoAcceptedCorrect + m.autoAcceptedIncorrect + m.sentToReview;
+  // Las sin contestar entran al total: si no, el % de revisión se calcularía
+  // sobre una base recortada y se vería mejor de lo que es.
+  const totalAnswers =
+    m.autoAcceptedCorrect + m.autoAcceptedIncorrect + m.autoAcceptedBlank + m.sentToReview;
   const reviewPct = totalAnswers > 0 ? ((m.sentToReview / totalAnswers) * 100).toFixed(1) : "0";
 
   return (
@@ -28,6 +31,7 @@ export function Metrics({ detail }: { detail: BatchDetail }) {
         <div className="statgrid">
           <Stat tone="bad" label={UI.metrics.autoIncorrect} value={m.autoAcceptedIncorrect} note={UI.metrics.autoIncorrectNote} />
           <Stat tone="ok" label={UI.metrics.autoCorrect} value={m.autoAcceptedCorrect.toLocaleString("es-PE")} note="respuestas del lote" />
+          <Stat label={UI.metrics.autoBlank} value={m.autoAcceptedBlank} note={UI.metrics.autoBlankNote} />
           <Stat tone="review" label={UI.metrics.toReview} value={m.sentToReview} note={`${reviewPct}% de las respuestas`} />
           <Stat tone="bad" label={UI.metrics.rejectedSheets} value={m.anomalousRejections} note={UI.metrics.rejectedNote} />
         </div>
@@ -40,6 +44,11 @@ export function Metrics({ detail }: { detail: BatchDetail }) {
                 {m.autoAcceptedCorrect > 0 && (
                   <div className="bc-seg bc-seg--ok" style={{ width: `${(m.autoAcceptedCorrect / totalAnswers) * 100}%` }}>
                     {m.autoAcceptedCorrect}
+                  </div>
+                )}
+                {m.autoAcceptedBlank > 0 && (
+                  <div className="bc-seg bc-seg--blank" style={{ width: `${(m.autoAcceptedBlank / totalAnswers) * 100}%` }}>
+                    {m.autoAcceptedBlank}
                   </div>
                 )}
                 {m.sentToReview > 0 && (

@@ -358,7 +358,7 @@ td.num, th.num { text-align: right; }
 .resolve-panel { padding: 18px 20px; min-width: 0; }
 
 .sheet-frame { position: relative; background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 3px; padding: 14px; }
-.sheet-frame canvas { display: block; width: 100%; height: auto; }
+.sheet-frame canvas, .sheet-frame img { display: block; width: 100%; height: auto; }
 /* Marcas de registro — eco de los fiduciales reales de la hoja */
 .sheet-frame::before, .sheet-frame::after {
   content: ""; position: absolute; width: 11px; height: 11px; border: 1.5px solid var(--pencil); opacity: .5;
@@ -541,6 +541,9 @@ td.num, th.num { text-align: right; }
 .bc-seg--ok { background: var(--ok); }
 .bc-seg--review { background: var(--review); }
 .bc-seg--bad { background: var(--bad); }
+/* Sin contestar: gris neutro a propósito — no es un acierto ni un error ni
+   una duda, es una pregunta que el alumno dejó vacía. */
+.bc-seg--blank { background: var(--ink-muted); }
 
 @media (max-width: 1080px) {
   .resolve { grid-template-columns: 1fr; }
@@ -576,6 +579,24 @@ td.num, th.num { text-align: right; }
 .code-input { width: 100px; letter-spacing: .12em; text-align: center; }
 .keytext { width: 100%; resize: vertical; line-height: 1.7; letter-spacing: .08em; }
 .code-input:focus-visible, .keytext:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 1px; }
+
+/* Formulario de GenerateSheet.tsx — pila vertical simple: con 3 campos no
+   hace falta una grilla con breakpoints, y una columna es responsive gratis
+   en cualquier ancho, celular incluido. */
+.fieldgrid { display: flex; flex-direction: column; gap: 14px; max-width: 420px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-family: var(--sans); font-size: var(--t-xs); font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-muted); }
+.field-input {
+  font-family: var(--sans);
+  font-size: var(--t-bd);
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+.field-input:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 1px; }
+.generate-preview { margin-top: 16px; padding: 10px 12px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: var(--t-sm); }
 
 select.btn { appearance: none; padding-right: 26px; background-image: none; max-width: 220px; }
 .method:disabled { opacity: .5; cursor: wait; }

@@ -92,6 +92,7 @@ export interface BatchMetrics {
   rejectionsByReason: Record<string, number>;
   autoAcceptedCorrect: number;
   autoAcceptedIncorrect: number;
+  autoAcceptedBlank: number;
   sentToReview: number;
   averageGrade: number | null;
 }

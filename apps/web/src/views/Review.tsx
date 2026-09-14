@@ -8,11 +8,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { BatchDetail, SheetSummary } from "../engine-browser/localClient.ts";
-import { postCorrection } from "../engine-browser/localClient.ts";
+import { postCorrection, useReviewImageUrl } from "../engine-browser/localClient.ts";
 import { suggestionFor } from "./batchSuggestion.ts";
 import { UI, REVIEW_REASON } from "../strings.ts";
 import { Card, CardHead, Chip, ViewHead, Empty, Bubble } from "../ui/primitives.tsx";
-import { SheetCanvas, type CanvasQuestion } from "../ui/SheetCanvas.tsx";
 
 interface Item {
   sheetId: string;
@@ -32,7 +31,11 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
     for (const s of detail.sheets) {
       if (!s.projected) continue;
       for (const q of s.projected.questions) {
-        if (q.state.kind === "ANSWERED" || q.corrected) continue;
+        // BLANK no entra a la cola: una pregunta sin contestar no es una
+        // duda que alguien tenga que resolver, es una respuesta que vale 0.
+        // Mismo criterio que sheetProjection.ts::pendingOrdinals — ver ahí
+        // por qué la guarda de blanco hace que esto sea seguro.
+        if (q.state.kind === "ANSWERED" || q.state.kind === "BLANK" || q.corrected) continue;
         out.push({
           sheetId: s.id,
           studentId: s.projected.studentId,
@@ -151,6 +154,20 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
     return () => window.removeEventListener("keydown", onKey);
   }, [current, picked, items.length]);
 
+  // Ver la nota extensa de useReviewImageUrl() en localClient.ts: recorte
+  // fotográfico REAL de la hoja, no una representación — con la pregunta
+  // bajo revisión resaltada con su propio marco (ver FOCUS_COLOR en
+  // readingOverlay.ts), distinto de los anillos verde/ámbar de lectura.
+  //
+  // ANTES del "if (items.length === 0) return" de abajo, a propósito: un
+  // hook nunca puede quedar después de un return condicional — el número
+  // de hooks que un componente llama tiene que ser el mismo en cada render,
+  // React los identifica por ORDEN de llamada, no por nombre. Puesto después,
+  // esto pasaba React.length===0 → 0 hooks; con items → 1 hook más que la
+  // vez anterior — "Rendered more hooks than during the previous render",
+  // confirmado en Chromium real al cargar la primera hoja de un lote nuevo.
+  const reviewImage = useReviewImageUrl(current?.sheetId ?? null, current?.ordinal ?? null);
+
   if (items.length === 0) {
     return (
       <>
@@ -258,12 +275,14 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
         <Card className="resolve">
           <div className="resolve-visual">
             <div className="sheet-frame">
-              <SheetCanvas
-                questions={neighbourhood(sheet, current!.ordinal)}
-                focusOrdinal={current!.ordinal}
-                options={OPTIONS}
-                height={260}
-              />
+              {reviewImage.loading && <div className="sheet-image-loading">{UI.common.loading}</div>}
+              {reviewImage.error && <div className="sheet-image-empty">{UI.detail.imageUnavailable}</div>}
+              {reviewImage.data && (
+                <img
+                  src={reviewImage.data}
+                  alt={`Zona de la hoja en la pregunta ${current!.ordinal}`}
+                />
+              )}
             </div>
             <div className="sheet-caption">
               hoja {current!.studentId || "sin código"} · pregunta {current!.ordinal}
@@ -321,26 +340,6 @@ export function Review({ detail, onResolved }: { detail: BatchDetail; onResolved
       </div>
     </>
   );
-}
-
-/** Las preguntas vecinas dan contexto: se ve la marca dudosa entre marcas normales. */
-function neighbourhood(sheet: SheetSummary | undefined, ordinal: number): CanvasQuestion[] {
-  const questions = sheet?.projected?.questions ?? [];
-  const measurements = sheetMeasurements(sheet);
-  const out: CanvasQuestion[] = [];
-  for (let n = ordinal - 2; n <= ordinal + 2; n++) {
-    if (n < 1) continue;
-    const q = questions.find((x) => x.ordinal === n);
-    if (!q) continue;
-    out.push({
-      ordinal: n,
-      answer: q.state.kind === "ANSWERED" ? q.state.option : undefined,
-      // Valores REALES medidos por el motor, no una representación: es lo
-      // que permite decidir mirando la marca en vez de confiar a ciegas.
-      fills: measurements[n],
-    });
-  }
-  return out;
 }
 
 /** La evidencia numérica: qué tan oscura salió cada opción. */

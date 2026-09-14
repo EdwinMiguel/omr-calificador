@@ -3,7 +3,9 @@ import { uploadSheets, type UploadResult, type UploadProgress } from "../engine-
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Callout, ViewHead, Bubble, Chip } from "../ui/primitives.tsx";
 
-export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: () => void }) {
+export function Upload(
+  { batchId, onUploaded, onGoToGenerate }: { batchId: string; onUploaded: () => void; onGoToGenerate: () => void }
+) {
   const [results, setResults] = useState<UploadResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
@@ -49,12 +51,9 @@ export function Upload({ batchId, onUploaded }: { batchId: string; onUploaded: (
             {UI.upload.templateBody}
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <a className="btn btn--primary" href="/hoja-oficial-colegio.pdf" download>
-              {UI.upload.templateDownload}
-            </a>
-            <span style={{ fontSize: "var(--t-sm)", color: "var(--ink-muted)" }}>
-              {UI.upload.templatePrintHint}
-            </span>
+            <button className="btn btn--primary" onClick={onGoToGenerate}>
+              {UI.upload.templateGoToGenerate}
+            </button>
           </div>
         </Card>
 

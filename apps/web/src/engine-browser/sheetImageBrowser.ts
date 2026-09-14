@@ -12,7 +12,8 @@
 
 import type { GrayImage } from "../../../../packages/engine/types.ts";
 import { renderReadingOverlay, type ReadingMark } from "../../../../packages/engine/readingOverlay.ts";
-import type { Template } from "../../../../template.ts";
+import type { RectMm, Template } from "../../../../template.ts";
+import { mmToPx } from "../../../../template.ts";
 import { decodeRasterBlob, makeReadableCanvas } from "./grayscale.ts";
 
 /**
@@ -62,18 +63,34 @@ export function buildReadingMarks(
   }));
 }
 
+export interface RenderSheetImageOptions {
+  /** Redimensiona antes de codificar. MEDIDO del lado servidor: la hoja
+   * completa pesa ~1.8MB en PNG; a 1000px de ancho, ~680KB y se ve igual
+   * mientras está ajustada a la pantalla — la resolución completa solo
+   * hace falta al hacer zoom. */
+  targetWidth?: number;
+  /**
+   * Recorta a esta región (mm, coordenadas de la hoja) ANTES de
+   * redimensionar — para la revisión manual, que necesita la zona de UNA
+   * pregunta con sus vecinas, no la hoja de 297mm completa. El overlay se
+   * dibuja SIEMPRE sobre la imagen entera primero (renderReadingOverlay
+   * necesita las coordenadas completas para ubicar cada marca) y el
+   * recorte es el último paso, sobre el resultado ya pintado.
+   */
+  cropRectMm?: RectMm;
+  /** Id del grupo a resaltar con el marco de foco (ver la nota de
+   * FOCUS_COLOR en readingOverlay.ts) — "esto es lo que se está mirando
+   * ahora", no un estado de lectura. */
+  focusGroupId?: string;
+}
+
 /**
  * Dibuja (opcionalmente) el overlay sobre la imagen alineada y devuelve una
  * URL de objeto lista para un <img src>. Equivalente local de
- * GET /api/sheets/:id/image del servidor — mismas dos opciones:
+ * GET /api/sheets/:id/image del servidor.
  *
- *   marks=null    → la hoja tal cual, sin intervención del programa. Es
- *                   cómo se comprueba que un anillo no esté tapando una duda.
- *   targetWidth   → redimensiona antes de codificar. MEDIDO del lado
- *                   servidor: la hoja completa pesa ~1.8MB en PNG; a 1000px
- *                   de ancho, ~680KB y se ve igual mientras está ajustada a
- *                   la pantalla — la resolución completa solo hace falta al
- *                   hacer zoom.
+ *   marks=null → la hoja tal cual, sin intervención del programa. Es cómo
+ *                se comprueba que un anillo no esté tapando una duda.
  *
  * Se usa URL de objeto y no data: URL a propósito — un data: URL codifica en
  * base64 (~33% más pesado) y vive como string gigante en el heap de JS; una
@@ -88,9 +105,12 @@ export async function renderSheetImageUrl(
   template: Template,
   dpi: number,
   marks: ReadingMark[] | null,
-  targetWidth?: number
+  opts: RenderSheetImageOptions = {}
 ): Promise<{ url: string; revoke: () => void }> {
-  const rgb = marks ? renderReadingOverlay(aligned, template, dpi, marks) : null;
+  const { targetWidth, cropRectMm, focusGroupId } = opts;
+  const rgb = (marks || focusGroupId)
+    ? renderReadingOverlay(aligned, template, dpi, marks ?? [], focusGroupId)
+    : null;
 
   const ctx = makeReadableCanvas(aligned.width, aligned.height);
   const imageData = ctx.createImageData(aligned.width, aligned.height);
@@ -103,15 +123,30 @@ export async function renderSheetImageUrl(
   }
   ctx.putImageData(imageData, 0, 0);
 
+  // Región de origen: toda la imagen, o el recorte pedido — recortado
+  // contra los bordes reales para no pedirle a drawImage un rectángulo que
+  // se sale del canvas (pasaría si cropRectMm queda parcialmente fuera de
+  // la hoja, ej. la primera/última pregunta con vecinas hacia afuera).
+  let srcX = 0, srcY = 0, srcW = aligned.width, srcH = aligned.height;
+  if (cropRectMm) {
+    const x0 = Math.max(0, Math.round(mmToPx(cropRectMm.x, dpi)));
+    const y0 = Math.max(0, Math.round(mmToPx(cropRectMm.y, dpi)));
+    const x1 = Math.min(aligned.width, Math.round(mmToPx(cropRectMm.x + cropRectMm.w, dpi)));
+    const y1 = Math.min(aligned.height, Math.round(mmToPx(cropRectMm.y + cropRectMm.h, dpi)));
+    srcX = x0; srcY = y0; srcW = Math.max(1, x1 - x0); srcH = Math.max(1, y1 - y0);
+  }
+
+  const scale = targetWidth && targetWidth < srcW ? targetWidth / srcW : 1;
+  const outW = Math.round(srcW * scale);
+  const outH = Math.round(srcH * scale);
+
   let sourceCanvas: OffscreenCanvas = ctx.canvas;
-  if (targetWidth && targetWidth < aligned.width) {
-    const scale = targetWidth / aligned.width;
-    const outHeight = Math.round(aligned.height * scale);
-    const resized = new OffscreenCanvas(targetWidth, outHeight);
-    const rctx = resized.getContext("2d");
-    if (!rctx) throw new Error("No se pudo obtener contexto 2D para redimensionar");
-    rctx.drawImage(ctx.canvas, 0, 0, targetWidth, outHeight);
-    sourceCanvas = resized;
+  if (cropRectMm || scale !== 1) {
+    const out = new OffscreenCanvas(outW, outH);
+    const octx = out.getContext("2d");
+    if (!octx) throw new Error("No se pudo obtener contexto 2D para recortar/redimensionar");
+    octx.drawImage(ctx.canvas, srcX, srcY, srcW, srcH, 0, 0, outW, outH);
+    sourceCanvas = out;
   }
 
   const blob = await sourceCanvas.convertToBlob({ type: "image/png" });

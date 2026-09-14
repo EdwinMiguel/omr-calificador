@@ -321,14 +321,27 @@ export async function composeHalfSheetA4(t: Template, info: HeaderInfo): Promise
   return doc.save();
 }
 
+/**
+ * IIFE async, no `await` de nivel de módulo: GenerateSheet.tsx ya importa
+ * este archivo para el navegador (composeHalfSheetA4 corre client-side),
+ * así que Vite empaqueta el módulo COMPLETO, este bloque incluido. Un
+ * `await` a nivel de módulo es un error de sintaxis para el target de
+ * esbuild del build de producción — MEDIDO: "Top-level await is not
+ * available in the configured target environment", build roto en seco,
+ * no algo que el guard de `typeof process` evite (el guard decide si el
+ * bloque CORRE, no si la sintaxis es válida para ese target). La condición
+ * de adentro sigue garantizando que nunca se ejecuta en el navegador.
+ */
 if (typeof process !== "undefined" && import.meta.url === `file://${process.argv[1]}`) {
-  const { writeFileSync } = await import("node:fs");
-  const t = buildHalfSheetTemplate(100);
-  const bytes = await composeHalfSheetA4(t, {
-    institucion: "I.E. Ejemplo",
-    curso: "Comunicación",
-    tipoExamen: "Examen bimestral",
-  });
-  writeFileSync("hoja-media-a4.pdf", bytes);
-  console.log(`✓ hoja-media-a4.pdf generado (${bytes.length} bytes) — 2 mitades de ${t.page.widthMm}×${t.page.heightMm}mm en una A4`);
+  void (async () => {
+    const { writeFileSync } = await import("node:fs");
+    const t = buildHalfSheetTemplate(100);
+    const bytes = await composeHalfSheetA4(t, {
+      institucion: "I.E. Ejemplo",
+      curso: "Comunicación",
+      tipoExamen: "Examen bimestral",
+    });
+    writeFileSync("hoja-media-a4.pdf", bytes);
+    console.log(`✓ hoja-media-a4.pdf generado (${bytes.length} bytes) — 2 mitades de ${t.page.widthMm}×${t.page.heightMm}mm en una A4`);
+  })();
 }

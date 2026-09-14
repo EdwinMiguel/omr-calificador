@@ -14,20 +14,21 @@ function blankSheet(): GrayImage {
 }
 
 /** Cuenta píxeles que no son grises — es decir, pintados por el overlay. */
-function countColored(rgb: Uint8Array): { read: number; review: number } {
-  let read = 0, review = 0;
+function countColored(rgb: Uint8Array): { read: number; review: number; focus: number } {
+  let read = 0, review = 0, focus = 0;
   for (let p = 0; p < rgb.length; p += 3) {
     const r = rgb[p]!, g = rgb[p + 1]!, b = rgb[p + 2]!;
     if (r === 22 && g === 140 && b === 80) read++;
     else if (r === 200 && g === 130 && b === 0) review++;
+    else if (r === 61 && g === 91 && b === 196) focus++;
   }
-  return { read, review };
+  return { read, review, focus };
 }
 
 describe("renderReadingOverlay", () => {
   it("sin marcas devuelve la imagen intacta en gris — no inventa señales", () => {
     const rgb = renderReadingOverlay(blankSheet(), template, DPI, []);
-    expect(countColored(rgb)).toEqual({ read: 0, review: 0 });
+    expect(countColored(rgb)).toEqual({ read: 0, review: 0, focus: 0 });
   });
 
   it("dibuja un anillo verde sobre la opción leída", () => {
@@ -62,7 +63,7 @@ describe("renderReadingOverlay", () => {
       { groupId: "q.999", options: ["A"], tone: "read" },
       { groupId: "q.1", options: ["Z"], tone: "read" },
     ];
-    expect(countColored(renderReadingOverlay(blankSheet(), template, DPI, marks))).toEqual({ read: 0, review: 0 });
+    expect(countColored(renderReadingOverlay(blankSheet(), template, DPI, marks))).toEqual({ read: 0, review: 0, focus: 0 });
   });
 
   it("también marca las columnas del código del alumno, no solo las preguntas", () => {
@@ -80,5 +81,33 @@ describe("renderReadingOverlay", () => {
     const idx = (cy * width + cx) * 3;
     // El centro exacto de la burbuja sigue siendo el papel original.
     expect([rgb[idx], rgb[idx + 1], rgb[idx + 2]]).toEqual([255, 255, 255]);
+  });
+
+  it("sin focusGroupId no dibuja ningún marco — retrocompatible con el llamador que ya existía", () => {
+    const marks: ReadingMark[] = [{ groupId: "q.1", options: ["B"], tone: "read" }];
+    const { focus } = countColored(renderReadingOverlay(blankSheet(), template, DPI, marks));
+    expect(focus).toBe(0);
+  });
+
+  it("con focusGroupId dibuja el marco de foco, en su propio color — distinto de leído/revisión", () => {
+    const marks: ReadingMark[] = [{ groupId: "q.1", options: ["B"], tone: "read" }];
+    const { read, focus } = countColored(renderReadingOverlay(blankSheet(), template, DPI, marks, "q.1"));
+    expect(focus).toBeGreaterThan(0);
+    expect(read).toBeGreaterThan(0); // el anillo de la marca sigue ahí, el marco no lo reemplaza
+  });
+
+  it("el marco de foco rodea la FILA entera de la pregunta, no solo una opción — más grande que un anillo", () => {
+    const oneRing = countColored(
+      renderReadingOverlay(blankSheet(), template, DPI, [{ groupId: "q.1", options: ["B"], tone: "read" }], "q.1")
+    ).focus;
+    // Un marco alrededor de 5 burbujas en línea tiene que pintar bastantes
+    // más píxeles que un anillo de una sola — si no, no es un marco, es
+    // casi un anillo más.
+    expect(oneRing).toBeGreaterThan(50);
+  });
+
+  it("un focusGroupId que no existe en la plantilla no revienta, y no dibuja nada", () => {
+    const rgb = renderReadingOverlay(blankSheet(), template, DPI, [], "q.999");
+    expect(countColored(rgb)).toEqual({ read: 0, review: 0, focus: 0 });
   });
 });

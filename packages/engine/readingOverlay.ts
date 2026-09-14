@@ -20,6 +20,7 @@
 
 import type { GrayImage } from "./types.ts";
 import type { Template } from "../../template.ts";
+import { groupsBoundingBoxMm } from "../../template.ts";
 
 export type MarkTone = "read" | "review";
 
@@ -43,11 +44,28 @@ const RING_THICKNESS_MM = 0.45;
 /** Cuánto más grande que la burbuja se dibuja el anillo, para no cubrir el grafito. */
 const RING_MARGIN_MM = 0.7;
 
+/**
+ * Marco de foco: "esto es lo que estás mirando ahora mismo" — distinto de
+ * verde/ámbar, que dicen "así quedó leído". Mismo azul que ya usaba el
+ * recorte sintético de la revisión manual (--accent-br en styles.css,
+ * #3D5BC4) para no introducir un tercer significado de color que el
+ * profesor tenga que aprender de nuevo.
+ */
+const FOCUS_COLOR: [number, number, number] = [61, 91, 196];
+const FOCUS_THICKNESS_MM = 0.6;
+/** Más aire que el anillo de una burbuja sola: acá se rodea la FILA
+ * completa de la pregunta, no una opción — tiene que quedar claro que es
+ * "esta pregunta entera", no una marca más. */
+const FOCUS_MARGIN_MM = 1.4;
+
 export function renderReadingOverlay(
   normalized: GrayImage,
   template: Template,
   dpi: number,
-  marks: readonly ReadingMark[]
+  marks: readonly ReadingMark[],
+  /** Id del grupo a resaltar con el marco de foco (opcional). Ver la nota
+   * de FOCUS_COLOR — no es un estado de lectura, es un cursor. */
+  focusGroupId?: string
 ): Uint8Array {
   const { width, height, data } = normalized;
 
@@ -95,6 +113,24 @@ export function renderReadingOverlay(
     }
   };
 
+  /** Marco hueco (no relleno, para no tapar nada debajo) alrededor de un
+   * rectángulo en mm. */
+  const strokeRect = (
+    xMm: number, yMm: number, wMm: number, hMm: number, thicknessMm: number, color: [number, number, number]
+  ): void => {
+    const x0 = Math.round(mmToPx(xMm));
+    const y0 = Math.round(mmToPx(yMm));
+    const x1 = Math.round(mmToPx(xMm + wMm));
+    const y1 = Math.round(mmToPx(yMm + hMm));
+    const t = Math.max(1, Math.round(mmToPx(thicknessMm)));
+    for (let x = x0; x <= x1; x++) {
+      for (let k = 0; k < t; k++) { paint(x, y0 + k, color); paint(x, y1 - k, color); }
+    }
+    for (let y = y0; y <= y1; y++) {
+      for (let k = 0; k < t; k++) { paint(x0 + k, y, color); paint(x1 - k, y, color); }
+    }
+  };
+
   const groups = new Map(template.groups.map((g) => [g.id, g]));
   const bubbleRadiusMm = template.bubbleDiameterMm / 2 + RING_MARGIN_MM;
 
@@ -118,6 +154,12 @@ export function renderReadingOverlay(
       if (!bubble) continue;
       ring(bubble.center.x, bubble.center.y, bubbleRadiusMm, color);
     }
+  }
+
+  if (focusGroupId) {
+    const focusGroup = groups.get(focusGroupId);
+    const box = focusGroup ? groupsBoundingBoxMm([focusGroup], template.bubbleDiameterMm, FOCUS_MARGIN_MM) : null;
+    if (box) strokeRect(box.x, box.y, box.w, box.h, FOCUS_THICKNESS_MM, FOCUS_COLOR);
   }
 
   return rgb;

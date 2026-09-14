@@ -7,9 +7,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useBatches, useBatch, createBatch, repo } from "./engine-browser/localClient.ts";
+import { useBatches, useBatch, createBatch, renameBatch, deleteBatch, repo } from "./engine-browser/localClient.ts";
 import { importBatchBackup } from "./engine-browser/backupRestore.ts";
+import { ENGINE_VERSION } from "../../../packages/engine/analyzeSheet.ts";
 import { UI, SUPPORT } from "./strings.ts";
+import { GenerateSheet } from "./views/GenerateSheet.tsx";
 import { Upload } from "./views/Upload.tsx";
 import { Results } from "./views/Results.tsx";
 import { Review } from "./views/Review.tsx";
@@ -19,7 +21,7 @@ import { SheetDetail } from "./views/SheetDetail.tsx";
 import { Metrics } from "./views/Metrics.tsx";
 import { Chip, Empty, Callout } from "./ui/primitives.tsx";
 
-type View = "cargar" | "resultados" | "revision" | "rechazadas" | "clave" | "detalle" | "metricas";
+type View = "generar" | "cargar" | "resultados" | "revision" | "rechazadas" | "clave" | "detalle" | "metricas";
 
 export function App() {
   const batches = useBatches();
@@ -54,6 +56,40 @@ export function App() {
     detail.reload();
   }
 
+  async function doRenameBatch() {
+    if (!batchId || !d) return;
+    const label = window.prompt(UI.common.renameBatchPrompt, d.batch.label);
+    if (!label || label === d.batch.label) return;
+    await renameBatch(batchId, label);
+    batches.reload();
+    detail.reload();
+  }
+
+  async function doDeleteBatch() {
+    if (!batchId || !d) return;
+    // Destructivo y no reversible (borra hojas, clave y correcciones junto
+    // con el lote — ver indexedDbRepository.ts::deleteBatch): confirmación
+    // explícita con el conteo real, no un "¿estás seguro?" genérico.
+    const ok = window.confirm(UI.common.confirmDeleteBatch(d.batch.label, d.sheets.length));
+    if (!ok) return;
+    await deleteBatch(batchId);
+    // BUG REAL, encontrado probando el flujo completo: poner `setBatchId(null)`
+    // acá y confiar en el efecto de auto-selección de abajo no alcanza — ese
+    // efecto lee `batches.data`, que en este instante TODAVÍA es la lista
+    // vieja (batches.reload() es async y no resolvió todavía) y sigue
+    // trayendo el lote recién borrado primero en el orden. El efecto vuelve
+    // a seleccionar ese id muerto, useBatch(id) lo busca y tira "Lote no
+    // encontrado" — y como el efecto solo corre con `!batchId`, un id que
+    // apunta a un lote muerto (no null, solo inexistente) ya no dispara una
+    // reselección: la pantalla queda rota hasta que el profesor elija otro
+    // lote a mano. Se lee la lista fresca directo del repositorio, sin pasar
+    // por el estado cacheado, para no depender de esa carrera.
+    const remaining = await repo.listBatches();
+    setBatchId(remaining.length > 0 ? remaining[0]!.id : null);
+    setSheetId(null);
+    batches.reload();
+  }
+
   async function restoreBackup(file: File | null) {
     if (!file) return;
     setRestoreError(null);
@@ -82,25 +118,35 @@ export function App() {
           </svg>
           <div>
             <div className="brand-name">{UI.appName}</div>
-            <div className="brand-sub">{UI.engineLabel("0.1.0")}</div>
+            <div className="brand-sub">{UI.engineLabel(ENGINE_VERSION)}</div>
           </div>
         </div>
 
+        {/*
+          Orden = flujo real, no las categorías de datos: generar la hoja →
+          cargarla ya escaneada → decirle al sistema qué es correcto → ver
+          los resultados. Antes "Clave de respuestas" quedaba numerada
+          DESPUÉS de "Revisión"/"Rechazadas" (05, cuando esas eran 03/04)
+          aunque hiciera falta antes que "Resultados" mostrara algo útil —
+          y "Generar hoja" ni figuraba. Ver App.tsx del commit anterior si
+          hace falta comparar.
+        */}
         <nav className="nav" aria-label="Vistas">
           <div className="nav-group">{UI.nav.process}</div>
-          <NavItem step="01" view="cargar" active={view} onClick={setView}>{UI.nav.upload}</NavItem>
-          <NavItem step="02" view="resultados" active={view} onClick={setView}>{UI.nav.results}</NavItem>
+          <NavItem step="01" view="generar" active={view} onClick={setView}>{UI.nav.generate}</NavItem>
+          <NavItem step="02" view="cargar" active={view} onClick={setView}>{UI.nav.upload}</NavItem>
+          <NavItem step="03" view="clave" active={view} onClick={setView}>{UI.nav.answerKey}</NavItem>
+          <NavItem step="04" view="resultados" active={view} onClick={setView}>{UI.nav.results}</NavItem>
 
           <div className="nav-group">{UI.nav.resolve}</div>
-          <NavItem step="03" view="revision" active={view} onClick={setView} count={pendingReview} tone="review">
+          <NavItem step="05" view="revision" active={view} onClick={setView} count={pendingReview} tone="review">
             {UI.nav.review}
           </NavItem>
-          <NavItem step="04" view="rechazadas" active={view} onClick={setView} count={rejectedCount} tone="bad">
+          <NavItem step="06" view="rechazadas" active={view} onClick={setView} count={rejectedCount} tone="bad">
             {UI.nav.rejected}
           </NavItem>
 
           <div className="nav-group">{UI.nav.configure}</div>
-          <NavItem step="05" view="clave" active={view} onClick={setView}>{UI.nav.answerKey}</NavItem>
           <NavItem step="07" view="metricas" active={view} onClick={setView}>{UI.nav.metrics}</NavItem>
         </nav>
 
@@ -148,6 +194,16 @@ export function App() {
                 <option key={b.id} value={b.id}>{b.label}</option>
               ))}
             </select>
+            {batchId && d && (
+              <>
+                <button className="btn btn--sm" onClick={() => void doRenameBatch()}>
+                  {UI.common.renameBatch}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => void doDeleteBatch()}>
+                  {UI.common.deleteBatch}
+                </button>
+              </>
+            )}
             <button className="btn btn--sm" onClick={() => void newBatch()}>{UI.common.newBatch}</button>
             <button className="btn btn--sm" onClick={() => restoreInputRef.current?.click()}>
               {UI.common.restoreBackup}
@@ -168,7 +224,10 @@ export function App() {
           {detail.loading && <Empty>{UI.common.loading}</Empty>}
           {detail.error && <Empty>{detail.error}</Empty>}
 
-          {d && view === "cargar" && <Upload batchId={d.batch.id} onUploaded={refresh} />}
+          {d && view === "generar" && <GenerateSheet />}
+          {d && view === "cargar" && (
+            <Upload batchId={d.batch.id} onUploaded={refresh} onGoToGenerate={() => setView("generar")} />
+          )}
           {d && view === "resultados" && (
             <Results
               detail={d}
