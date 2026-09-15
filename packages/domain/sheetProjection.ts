@@ -37,6 +37,25 @@ export interface ProjectedSheet {
   studentId: string;
   /** true si el código lo escribió una persona, no el motor. */
   studentIdCorrected: boolean;
+  /**
+   * ¿El código figura en la lista de alumnos del curso?
+   *
+   *   null  → no hay lista cargada; no se puede afirmar nada (es opcional)
+   *   true  → figura
+   *   false → NO figura: con certeza es un error de lectura o una hoja de
+   *           otro curso, y la hoja tiene que ir a revisión.
+   *
+   * POR QUÉ ES LA RED MÁS IMPORTANTE QUE TIENE EL SISTEMA: el código son 7
+   * dígitos sin dígito verificador. identification.ts ya rechaza la hoja si
+   * alguna columna no se lee con confianza, pero nada defendía el caso "se
+   * leyó con confianza y está mal" — que acredita la nota completa a otra
+   * persona sin ningún aviso. Ver roster.ts.
+   *
+   * Se evalúa sobre el código VIGENTE, o sea después de aplicar una
+   * corrección a mano: un código tecleado por una persona también puede
+   * tener un dedazo, y esta comprobación lo atrapa igual.
+   */
+  studentIdInRoster: boolean | null;
   questions: ProjectedQuestion[];
   score: Score;
   grade: Grade | null;
@@ -96,7 +115,9 @@ export function projectSheet(
   corrections: readonly CorrectionInput[],
   key: AnswerKey | null,
   voided: ReadonlySet<number> = new Set(),
-  rule: GradingRule = DEFAULT_GRADING_RULE
+  rule: GradingRule = DEFAULT_GRADING_RULE,
+  /** Códigos del curso. `null` = el profesor no cargó lista (ver roster.ts). */
+  roster: ReadonlySet<string> | null = null
 ): ProjectedSheet {
   const byOrdinal = new Map<number, CorrectionInput>();
   let idCorrection: CorrectionInput | null = null;
@@ -129,10 +150,12 @@ export function projectSheet(
   }));
 
   const counted = questions.filter((q) => !voided.has(q.ordinal));
+  const studentId = idCorrection?.resolvedStudentId ?? automatic.studentId;
 
   return {
-    studentId: idCorrection?.resolvedStudentId ?? automatic.studentId,
+    studentId,
     studentIdCorrected: idCorrection !== null,
+    studentIdInRoster: roster ? roster.has(studentId) : null,
     questions,
     score: computeScore(counted),
     grade: key ? computeGrade(questions, voided, rule) : null,
@@ -170,6 +193,14 @@ export interface BatchMetrics {
    */
   autoAcceptedBlank: number;
   sentToReview: number;
+  /**
+   * Hojas cuyo código NO figura en la lista del curso. Cuenta aparte de los
+   * rechazos porque NO son un rechazo: la hoja se leyó entera y bien, el
+   * problema es a quién pertenece. Sin esta cifra propia, una hoja así se
+   * mezclaba con las calificadas normales y nadie la miraba. Ver
+   * ProjectedSheet::studentIdInRoster.
+   */
+  unknownStudentIds: number;
   averageGrade: number | null;
 }
 
@@ -193,6 +224,7 @@ export function computeBatchMetrics(
   const rejectionsByReason: Record<string, number> = {};
   let processed = 0, rejected = 0, anomalousRejections = 0;
   let autoAcceptedCorrect = 0, autoAcceptedIncorrect = 0, autoAcceptedBlank = 0, sentToReview = 0;
+  let unknownStudentIds = 0;
   const grades: number[] = [];
 
   for (const s of sheets) {
@@ -213,6 +245,7 @@ export function computeBatchMetrics(
     // no contarlas subestimaría su desempeño real.
     const p = s.projected;
     if (!p) continue;
+    if (p.studentIdInRoster === false) unknownStudentIds++;
     for (const q of p.questions) {
       if (q.corrected) continue;
       if (q.state.kind === "BLANK") autoAcceptedBlank++;
@@ -233,6 +266,7 @@ export function computeBatchMetrics(
     autoAcceptedIncorrect,
     autoAcceptedBlank,
     sentToReview,
+    unknownStudentIds,
     averageGrade: grades.length
       ? Math.round((grades.reduce((a, b) => a + b, 0) / grades.length) * 10) / 10
       : null,

@@ -49,6 +49,8 @@ export interface Batch {
   templateId: string;
   templateVersion: string;
   createdAt: string;
+  /** Códigos del curso; ausente = sin nómina. Ver views/roster.ts. */
+  roster?: string[];
 }
 
 export interface ProjectedQuestion extends QuestionResult {
@@ -59,6 +61,8 @@ export interface ProjectedQuestion extends QuestionResult {
 export interface ProjectedSheet {
   studentId: string;
   studentIdCorrected: boolean;
+  /** null = el lote no tiene nómina cargada. Ver domain/sheetProjection.ts. */
+  studentIdInRoster: boolean | null;
   questions: ProjectedQuestion[];
   score: { correct: number; incorrect: number; ungraded: number; total: number };
   grade: Grade | null;
@@ -120,6 +124,8 @@ export interface BatchMetrics {
   autoAcceptedIncorrect: number;
   autoAcceptedBlank: number;
   sentToReview: number;
+  /** Hojas cuyo código no figura en la nómina del curso. */
+  unknownStudentIds: number;
   averageGrade: number | null;
 }
 
@@ -148,7 +154,30 @@ export interface Correction {
  * rechazada por código ilegible SÍ se proyecta, siempre que alguien haya
  * escrito el código a mano.
  */
-async function project(sheet: StoredSheet): Promise<ProjectedSheet | null> {
+/**
+ * La nómina NUNCA se congela dentro de la hoja al procesarla: se lee del
+ * lote en cada proyección. Cargar la lista después de haber subido las
+ * hojas tiene que revisar también las que ya estaban — el mismo principio
+ * de §13.7 que hace que activar la clave califique las hojas previas: no se
+ * guarda una conclusión, se reconstruye cada vez desde los hechos.
+ *
+ * Una lista vacía vale `null` (comprobación apagada), no un conjunto vacío
+ * que marcaría todas las hojas como desconocidas — ver setBatchRoster.
+ */
+async function rosterOf(batchId: string): Promise<ReadonlySet<string> | null> {
+  const batch = await repo.getBatch(batchId);
+  return batch?.roster?.length ? new Set(batch.roster) : null;
+}
+
+/**
+ * @param roster se recibe ya resuelto en vez de leerlo acá adentro: esta
+ * función corre UNA VEZ POR HOJA, y el lote es el mismo para todas — con 50
+ * hojas serían 50 lecturas idénticas de IndexedDB para el mismo dato.
+ */
+async function project(
+  sheet: StoredSheet,
+  roster: ReadonlySet<string> | null
+): Promise<ProjectedSheet | null> {
   const [corrections, key] = await Promise.all([
     repo.listCorrections(sheet.id),
     repo.getCurrentAnswerKey(sheet.batchId),
@@ -167,12 +196,17 @@ async function project(sheet: StoredSheet): Promise<ProjectedSheet | null> {
     automatic,
     corrections,
     key ? key.answers : null,
-    new Set(key?.voided ?? [])
+    new Set(key?.voided ?? []),
+    undefined,
+    roster
   );
 }
 
-async function sheetSummary(sheet: StoredSheet): Promise<SheetSummary> {
-  const projected = await project(sheet);
+async function sheetSummary(
+  sheet: StoredSheet,
+  roster: ReadonlySet<string> | null
+): Promise<SheetSummary> {
+  const projected = await project(sheet, roster);
   return {
     id: sheet.id,
     fileName: sheet.fileName,
@@ -240,7 +274,10 @@ export function useBatch(id: string | null): Async<BatchDetail> {
     if (!batch) throw new Error("Lote no encontrado");
 
     const [sheets, key] = await Promise.all([repo.listSheets(id), repo.getCurrentAnswerKey(id)]);
-    const summaries = await Promise.all(sheets.map(sheetSummary));
+    // El lote ya está cargado arriba: la nómina sale de ahí, sin releerla
+    // una vez por hoja (ver la nota de project()).
+    const roster = batch.roster?.length ? new Set(batch.roster) : null;
+    const summaries = await Promise.all(sheets.map((s) => sheetSummary(s, roster)));
 
     return {
       batch,
@@ -263,7 +300,7 @@ export function useSheet(id: string | null): Async<{ sheet: unknown; projected: 
     if (!sheet) throw new Error("Hoja no encontrada");
     return {
       sheet,
-      projected: await project(sheet),
+      projected: await project(sheet, await rosterOf(sheet.batchId)),
       corrections: await repo.listCorrections(id),
     };
   }, [id]);
@@ -277,6 +314,11 @@ export function createBatch(label: string): Promise<Batch> {
 
 export function renameBatch(id: string, label: string): Promise<void> {
   return repo.renameBatch(id, label);
+}
+
+/** Nómina de códigos del curso — ver views/roster.ts para el porqué. */
+export function setBatchRoster(id: string, roster: string[]): Promise<void> {
+  return repo.setBatchRoster(id, roster);
 }
 
 /** Borra el lote y todo lo que cuelga de él (hojas, claves, correcciones,
@@ -369,7 +411,8 @@ export async function postCorrection(
     throw new Error("Falta el código del alumno");
   }
 
-  const before = await project(sheet);
+  const roster = await rosterOf(sheet.batchId);
+  const before = await project(sheet, roster);
   const previous =
     body.ordinal === null
       ? before?.studentId ?? null
@@ -388,7 +431,7 @@ export async function postCorrection(
     createdBy: body.createdBy ?? "operador",
   });
 
-  return { correction, projected: await project(sheet) };
+  return { correction, projected: await project(sheet, roster) };
 }
 
 export async function postAnswerKey(
@@ -459,7 +502,7 @@ export function useSheetImageUrl(
     let marks = null;
     if (overlay) {
       const sheet = await repo.getSheet(sheetId);
-      const projected = sheet ? await project(sheet) : null;
+      const projected = sheet ? await project(sheet, await rosterOf(sheet.batchId)) : null;
       marks = buildReadingMarks(projected?.questions ?? []);
     }
 
@@ -509,7 +552,7 @@ export function useReviewImageUrl(
     const aligned = await pngBlobToGrayImage(png);
 
     const sheet = await repo.getSheet(sheetId);
-    const projected = sheet ? await project(sheet) : null;
+    const projected = sheet ? await project(sheet, await rosterOf(sheet.batchId)) : null;
     const marks = buildReadingMarks(projected?.questions ?? []);
 
     // Ver sameColumnNeighbours() en template.ts: ordinal±2 sin más cruzaría
@@ -523,6 +566,54 @@ export function useReviewImageUrl(
       focusGroupId: `q.${ordinal}`,
     });
   }, [sheetId, ordinal, width]);
+
+  useEffect(() => {
+    return () => result.data?.revoke();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result.data?.url]);
+
+  return { ...result, data: result.data?.url ?? null };
+}
+
+/**
+ * La FOTO del grid de 7 dígitos, para corregir el código mirando el papel.
+ *
+ * Mismo argumento que sostiene useReviewImageUrl para las respuestas,
+ * aplicado al caso más caro de equivocarse: acá el profesor tiene que
+ * TRANSCRIBIR 7 dígitos, no elegir entre 5 letras. Sin la imagen al lado,
+ * el único camino era ir a buscar la hoja de papel en la pila —y con el
+ * lote ya escaneado y guardado, puede que ni esté a mano— o escribir un
+ * código de memoria. Un código tecleado mal tiene exactamente la misma
+ * consecuencia que uno leído mal: la nota va a otra persona.
+ *
+ * Margen más generoso que en las preguntas (10mm contra 6mm): el grid del
+ * código está pegado al borde derecho de la hoja, y ver ese borde ayuda a
+ * confirmar que se está mirando la zona correcta.
+ *
+ * SIN overlay de lectura (marks = null): los anillos se dibujan sobre las
+ * RESPUESTAS y acá no aportan; se muestra el papel tal cual, que es
+ * exactamente contra lo que el profesor compara.
+ */
+const CODE_CROP_CONTEXT_MM = 10;
+
+export function useStudentIdImageUrl(sheetId: string | null, width?: number): Async<string> {
+  const result = useAsync(async () => {
+    if (!sheetId) return null as never;
+
+    const png = await repo.getSheetImage(sheetId);
+    if (!png) throw new Error("Esta hoja no se pudo enderezar para mostrarla");
+    const aligned = await pngBlobToGrayImage(png);
+
+    const digitGroups = template.groups.filter((g) => g.kind === "digit");
+    const cropRectMm = groupsBoundingBoxMm(
+      digitGroups, template.bubbleDiameterMm, CODE_CROP_CONTEXT_MM
+    );
+
+    return renderSheetImageUrl(aligned, template, DPI, null, {
+      targetWidth: width,
+      cropRectMm: cropRectMm ?? undefined,
+    });
+  }, [sheetId, width]);
 
   useEffect(() => {
     return () => result.data?.revoke();

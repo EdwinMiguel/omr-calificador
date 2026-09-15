@@ -56,7 +56,13 @@ export function App() {
   const d = detail.data;
 
   const pendingReview = d?.metrics.sentToReview ?? 0;
-  const rejectedCount = d?.sheets.filter((s) => s.outcome.kind === "rejected" && !s.projected).length ?? 0;
+  // El contador de "Rechazadas" suma las hojas con código fuera de la
+  // nómina: no son rechazos (se leyeron enteras y tienen nota), pero se
+  // resuelven en esa misma pantalla y necesitan la misma atención — si no
+  // se contaran acá, el menú diría 0 con hojas esperando dueño.
+  const rejectedCount =
+    (d?.sheets.filter((s) => s.outcome.kind === "rejected" && !s.projected).length ?? 0) +
+    (d?.metrics.unknownStudentIds ?? 0);
 
   async function newBatch() {
     // Con fecha, no un texto fijo: el prompt sugería SIEMPRE el mismo
@@ -274,7 +280,13 @@ export function App() {
 
           {d && view === "generar" && <GenerateSheet />}
           {d && view === "cargar" && (
-            <Upload batchId={d.batch.id} onUploaded={refresh} onGoToGenerate={() => setView("generar")} />
+            <Upload
+              batchId={d.batch.id}
+              roster={d.batch.roster}
+              onUploaded={refresh}
+              onGoToGenerate={() => setView("generar")}
+              onBatchChanged={refresh}
+            />
           )}
           {d && view === "resultados" && (
             <Results

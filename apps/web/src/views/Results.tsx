@@ -57,6 +57,14 @@ export function Results({
       <ViewHead title={UI.results.title} lead={UI.results.lead} />
       <div className="stack">
         {!answerKey && <Callout tone="warn">{UI.results.noKey}</Callout>}
+        {/* Va arriba de todo, al lado del botón de exportar: una nota
+            correcta con el dueño equivocado se ve igual de bien que una
+            correcta, y el CSV se la lleva sin protestar. */}
+        {metrics.unknownStudentIds > 0 && (
+          <Callout tone="warn">
+            <strong>{UI.results.unknownStudentWarn(metrics.unknownStudentIds)}</strong>
+          </Callout>
+        )}
         {error && <Callout tone="warn"><strong>{UI.common.error}.</strong> {error}</Callout>}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -151,9 +159,15 @@ function Row({
         {p.studentIdCorrected && <span className="topbar-meta" style={{ marginLeft: 6 }}>escrito a mano</span>}
       </td>
       <td>
-        {pending > 0
-          ? <Chip tone="review">{UI.common.doubts(pending)}</Chip>
-          : <Chip tone="ok">Calificada</Chip>}
+        {/* Un código fuera de la nómina gana sobre cualquier otro estado: la
+            hoja puede estar perfectamente leída y calificada, pero mostrarla
+            como "Calificada" a secas es justamente lo que hacía que nadie la
+            mirara. La nota existe; lo que falta es saber de quién es. */}
+        {p.studentIdInRoster === false
+          ? <Chip tone="bad">{UI.results.unknownStudent}</Chip>
+          : pending > 0
+            ? <Chip tone="review">{UI.common.doubts(pending)}</Chip>
+            : <Chip tone="ok">Calificada</Chip>}
       </td>
       <td className="num mono">{p.score.correct}</td>
       <td className="num mono">{p.score.incorrect}</td>
@@ -168,6 +182,9 @@ function Row({
             en Revisión. "Revisar" se suma al lado cuando hace falta, no la
             reemplaza. */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {p.studentIdInRoster === false && (
+            <button className="btn btn--sm" onClick={onRejected}>{UI.rejected.fixCode}</button>
+          )}
           {pending > 0 && (
             <button className="btn btn--sm" onClick={onReview}>{UI.common.review}</button>
           )}

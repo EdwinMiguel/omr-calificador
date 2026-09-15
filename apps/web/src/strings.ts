@@ -128,6 +128,30 @@ export const UI = {
       "El escaneo lee mejor que la foto de celular. Medido sobre la misma hoja: escaneada, 98 de 99 respuestas quedaron auto-aceptadas; fotografiada, 61. Ninguna de las dos produjo una respuesta incorrecta.",
   },
 
+  roster: {
+    heading: "Lista de códigos del curso",
+    why:
+      "El código del alumno son 7 dígitos sin dígito verificador: si el sistema lee un 7 donde había un 1, " +
+      "el resultado parece un código válido y la nota se le acredita a otra persona sin ningún aviso. " +
+      "Con la lista cargada, un código que no exista en el aula manda la hoja a revisión en vez de pasar en silencio.",
+    optional: "Es opcional — sin lista el sistema funciona igual, solo que sin esta protección.",
+    placeholder: "1234567\n2345678\n3456789",
+    hint: "Pegá los códigos: uno por línea, o separados por comas. Podés copiarlos directo de una columna de Excel.",
+    save: "Guardar lista",
+    clear: "Quitar lista",
+    active: (n: number) => `${n} ${n === 1 ? "código cargado" : "códigos cargados"}.`,
+    none: "Todavía no cargaste la lista del curso.",
+    parsed: (n: number) => `${n} ${n === 1 ? "código válido" : "códigos válidos"}`,
+    invalid: (items: string[]) =>
+      `${items.length} ${items.length === 1 ? "entrada no es un código" : "entradas no son códigos"} de 7 dígitos y ` +
+      `${items.length === 1 ? "queda" : "quedan"} afuera: ${items.slice(0, 6).join(", ")}${items.length > 6 ? "…" : ""}`,
+    zerosWarning:
+      "Ojo con Excel: si un código empieza con cero, Excel lo guarda como número y se lo come al copiar. " +
+      "El sistema NO los rellena solo — te los muestra como inválidos para que los revises.",
+    duplicates: (items: string[]) =>
+      `${items.length} ${items.length === 1 ? "código repetido" : "códigos repetidos"} (se guarda uno solo): ${items.join(", ")}`,
+  },
+
   results: {
     title: "Resultados del lote",
     lead: "Una fila por hoja. La nota se calcula al momento desde las respuestas leídas — si más tarde anulas una pregunta, todas se recalculan sin volver a escanear.",
@@ -137,6 +161,11 @@ export const UI = {
     average: "Promedio del aula",
     empty: "Todavía no hay hojas en este lote.",
     noKey: "Falta la clave de respuestas: las hojas están leídas pero aún no calificadas.",
+    unknownStudent: "Código desconocido",
+    unknownStudentWarn: (n: number) =>
+      `${n} ${n === 1 ? "hoja tiene un código que no figura" : "hojas tienen códigos que no figuran"} en la lista del curso. ` +
+      `${n === 1 ? "Su nota está calculada pero no se sabe de quién es" : "Sus notas están calculadas pero no se sabe de quiénes son"} — ` +
+      `resolvelo en "Hojas rechazadas" antes de exportar.`,
     exportCsv: "Exportar notas (CSV)",
     downloadBackup: "Descargar respaldo",
     columns: {
@@ -180,9 +209,22 @@ export const UI = {
     needsAction: "Acción necesaria",
     normal: "Normal en doble cara",
     writeCode: "Escribir código",
+    fixCode: "Corregir código",
     codePrompt: "Código del alumno (7 dígitos)",
     codeInvalid: "El código debe tener exactamente 7 dígitos.",
+    codeNotInRoster: "Ese código tampoco figura en la lista del curso.",
     recovered: "Hoja recuperada: sus respuestas ya estaban leídas.",
+    imageHint: "Así quedó el código en la hoja escaneada:",
+    imageLoading: "Cargando la imagen de la hoja…",
+    imageMissing: "No se guardó imagen de esta hoja.",
+    unknownTitle: "El código no está en la lista del curso",
+    unknownWhat:
+      "Estas hojas se leyeron completas y sin dudas, pero el código que traen no figura entre los alumnos del curso. " +
+      "Casi siempre es un dígito mal leído; también puede ser una hoja de otro curso que se coló en el lote.",
+    unknownAction:
+      "Compará el código con la imagen de la hoja y corregilo. Mientras no coincida con un alumno de la lista, " +
+      "la nota está calculada pero no se sabe de quién es.",
+    unknownRead: (code: string) => `el sistema leyó ${code}`,
   },
 
   answerKey: {

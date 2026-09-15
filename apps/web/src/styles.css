@@ -307,6 +307,22 @@ td.num, th.num { text-align: right; }
 .filerow-hash { font-family: var(--mono); font-size: 10.5px; color: var(--ink-muted); }
 .filerow-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 
+/* Fila que además puede desplegar la foto del código debajo: la fila normal
+   es una línea horizontal (align-items:center), así que la variante apila
+   en columna y mete su contenido original dentro de .filerow-main para que
+   esa línea siga comportándose igual que antes. */
+.filerow--stack { flex-direction: column; align-items: stretch; gap: 10px; }
+.filerow-main { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.codeshot {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface-2);
+}
+/* La hoja escaneada es gris sobre blanco: sobre el fondo oscuro del tema
+   nocturno se lee igual, pero el borde blanco del papel choca — el radio y
+   el fondo propio la separan del resto de la tarjeta. */
+.codeshot img { max-width: 100%; border-radius: 3px; background: #FFF; }
+
 .progress { height: 4px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--accent-br); border-radius: 3px; }
 

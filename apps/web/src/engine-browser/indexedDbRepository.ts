@@ -131,6 +131,22 @@ export class IndexedDbRepository implements Repository {
   }
 
   /**
+   * Guarda (o borra, con lista vacía) la nómina de códigos del curso.
+   *
+   * Una lista vacía guarda `undefined`, no `[]`: son dos cosas distintas —
+   * "no hay lista" desactiva la comprobación, mientras que "lista de cero
+   * alumnos" marcaría TODAS las hojas como código desconocido. Guardar []
+   * convertiría un intento de quitar la lista en una avalancha de avisos.
+   */
+  async setBatchRoster(id: string, roster: string[]): Promise<void> {
+    const db = await this.db();
+    const batch = await this.getBatch(id);
+    if (!batch) throw new Error("Lote no encontrado");
+    const next = { ...batch, roster: roster.length > 0 ? roster : undefined };
+    await tx(db, STORES.batches, "readwrite", (s) => s.put(next));
+  }
+
+  /**
    * Borra el lote Y TODO lo que cuelga de él: hojas, claves de respuestas,
    * correcciones e imágenes. Sin cascada manual, borrar solo el registro de
    * `batches` dejaría el resto huérfano ocupando espacio en IndexedDB para

@@ -22,6 +22,16 @@ export interface Batch {
   templateId: string;
   templateVersion: string;
   createdAt: string;
+  /**
+   * Códigos de los alumnos del curso, para detectar un código leído que no
+   * existe en el aula (ver apps/web/src/views/roster.ts y
+   * ProjectedSheet::studentIdInRoster).
+   *
+   * OPCIONAL, y por eso no hizo falta subir la versión de IndexedDB: un
+   * lote viejo simplemente no trae el campo y se comporta como antes. Un
+   * almacén de objetos completos no tiene columnas que agregar.
+   */
+  roster?: string[];
 }
 
 /**

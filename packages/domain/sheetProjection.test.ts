@@ -231,3 +231,77 @@ describe("computeBatchMetrics", () => {
     expect(m.averageGrade).toBe(20);
   });
 });
+
+/**
+ * La nómina es la única defensa del sistema contra "el código se leyó con
+ * confianza y está mal" — el fallo que acredita la nota completa a otra
+ * persona sin ningún aviso. Ver roster.ts y ProjectedSheet::studentIdInRoster.
+ */
+describe("projectSheet — nómina del curso", () => {
+  const hoja = { studentId: "7072391", questions: [answered(1, "B")] };
+
+  it("sin nómina no afirma nada: null, no false", () => {
+    // Importa que sea null y no false: false significa "no está en la
+    // lista" y manda la hoja a revisión. Un lote sin nómina mandaría
+    // TODAS las hojas a revisión si esto devolviera false.
+    expect(projectSheet(hoja, [], null).studentIdInRoster).toBeNull();
+  });
+
+  it("código que figura en la lista", () => {
+    const p = projectSheet(hoja, [], null, undefined, undefined, new Set(["7072391", "1234567"]));
+    expect(p.studentIdInRoster).toBe(true);
+  });
+
+  it("código que NO figura: es el caso que se quiere atrapar", () => {
+    const p = projectSheet(hoja, [], null, undefined, undefined, new Set(["1234567"]));
+    expect(p.studentIdInRoster).toBe(false);
+  });
+
+  it("la nota se calcula igual — el problema es de quién es, no cuánto sacó", () => {
+    const p = projectSheet(
+      { studentId: "9999999", questions: [answered(1, "B")] },
+      [], { 1: "B" }, undefined, undefined, new Set(["1234567"])
+    );
+    expect(p.studentIdInRoster).toBe(false);
+    expect(p.grade?.value).toBe(20);
+  });
+
+  describe("se evalúa sobre el código VIGENTE, no sobre el que leyó el motor", () => {
+    const corregido = (id: string): CorrectionInput[] => [
+      { ordinal: null, resolvedAs: null, resolvedStudentId: id, createdAt: "2026-09-15T10:00:00Z" },
+    ];
+
+    it("un código corregido a mano que SÍ está en la lista deja de avisar", () => {
+      const p = projectSheet(hoja, corregido("1234567"), null, undefined, undefined, new Set(["1234567"]));
+      expect(p.studentId).toBe("1234567");
+      expect(p.studentIdInRoster).toBe(true);
+    });
+
+    it("un dedazo al escribirlo a mano se atrapa igual que un error de lectura", () => {
+      // El motor había leído bien; la persona tecleó mal. Misma consecuencia,
+      // misma red — por eso la comprobación va después de la corrección.
+      const p = projectSheet(hoja, corregido("1234568"), null, undefined, undefined, new Set(["1234567"]));
+      expect(p.studentIdInRoster).toBe(false);
+    });
+  });
+
+  it("computeBatchMetrics cuenta las hojas sin dueño, aparte de los rechazos", () => {
+    const roster = new Set(["1111111"]);
+    const conocida = projectSheet({ studentId: "1111111", questions: [answered(1, "B")] }, [], { 1: "B" }, undefined, undefined, roster);
+    const ajena = projectSheet({ studentId: "2222222", questions: [answered(1, "B")] }, [], { 1: "B" }, undefined, undefined, roster);
+    const m = computeBatchMetrics([
+      { outcome: { kind: "processed" }, projected: conocida },
+      { outcome: { kind: "processed" }, projected: ajena },
+    ]);
+    expect(m.unknownStudentIds).toBe(1);
+    // No son rechazos: se leyeron enteras y cuentan como procesadas.
+    expect(m.rejected).toBe(0);
+    expect(m.processed).toBe(2);
+  });
+
+  it("sin nómina, unknownStudentIds es 0 — no avisa de lo que no puede saber", () => {
+    const sinLista = projectSheet(hoja, [], { 1: "B" });
+    const m = computeBatchMetrics([{ outcome: { kind: "processed" }, projected: sinLista }]);
+    expect(m.unknownStudentIds).toBe(0);
+  });
+});

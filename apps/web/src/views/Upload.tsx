@@ -2,9 +2,16 @@ import { useRef, useState } from "react";
 import { uploadSheets, type UploadResult, type UploadProgress } from "../engine-browser/localClient.ts";
 import { UI, REJECTION } from "../strings.ts";
 import { Card, CardHead, Callout, ViewHead, Bubble, Chip } from "../ui/primitives.tsx";
+import { RosterCard } from "./RosterCard.tsx";
 
 export function Upload(
-  { batchId, onUploaded, onGoToGenerate }: { batchId: string; onUploaded: () => void; onGoToGenerate: () => void }
+  { batchId, roster, onUploaded, onGoToGenerate, onBatchChanged }: {
+    batchId: string;
+    roster: string[] | undefined;
+    onUploaded: () => void;
+    onGoToGenerate: () => void;
+    onBatchChanged: () => void;
+  }
 ) {
   const [results, setResults] = useState<UploadResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -56,6 +63,13 @@ export function Upload(
             </button>
           </div>
         </Card>
+
+        {/* La nómina va ANTES de la zona de carga: es parte de preparar el
+            lote, y cargarla primero hace que las hojas se revisen contra la
+            lista desde la primera. Si se carga después igual funciona — la
+            comprobación se rehace en cada proyección, no se congela al
+            procesar (ver rosterOf() en localClient.ts). */}
+        <RosterCard batchId={batchId} roster={roster} onChanged={onBatchChanged} />
 
         <div
           className="drop"
