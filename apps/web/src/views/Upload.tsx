@@ -146,6 +146,8 @@ export function Upload(
 function UploadProgressBar({ progress }: { progress: UploadProgress | null }) {
   const total = progress?.total ?? null;
   const processed = progress?.processed ?? 0;
+  const fileIndex = progress?.fileIndex ?? 0;
+  const fileCount = progress?.fileCount ?? 0;
   const pct = total && total > 0 ? Math.min(100, (processed / total) * 100) : null;
 
   return (
@@ -158,8 +160,10 @@ function UploadProgressBar({ progress }: { progress: UploadProgress | null }) {
       </div>
       <div className="upload-progress-text mono">
         {total === null
-          ? UI.upload.preparing
-          : UI.upload.progress(processed, total)}
+          ? fileCount > 1
+            ? UI.upload.preparingFile(fileIndex, fileCount)
+            : UI.upload.preparing
+          : UI.upload.progress(processed, total, fileIndex, fileCount)}
         {progress?.currentFile && (
           <span className="upload-progress-file"> · {progress.currentFile}</span>
         )}

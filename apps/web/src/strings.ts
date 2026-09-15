@@ -120,7 +120,19 @@ export const UI = {
     dropHint: "PDF de varias páginas · JPG · PNG — se recomienda escáner a 200 DPI",
     working: "Leyendo hojas…",
     preparing: "Preparando…",
-    progress: (done: number, total: number) => `${done} de ${total} hojas leídas`,
+    preparingFile: (fileIndex: number, fileCount: number) =>
+      `archivo ${fileIndex} de ${fileCount} · preparando…`,
+    // El conteo de archivos se sabe desde el primer instante (files.length),
+    // a diferencia del de hojas: un PDF no revela cuántas páginas tiene
+    // hasta que se abre. Con varios archivos sueltos a la vez, mostrar solo
+    // "hojas leídas" hace que la barra retroceda cada vez que arranca un
+    // PDF nuevo (el total salta) sin que el profesor vea nunca la magnitud
+    // real de la tanda — por eso se antepone "archivo X de Y" cuando hay
+    // más de uno.
+    progress: (done: number, total: number, fileIndex: number, fileCount: number) =>
+      fileCount > 1
+        ? `archivo ${fileIndex} de ${fileCount} · ${done} de ${total} hojas leídas`
+        : `${done} de ${total} hojas leídas`,
     duplicate: "Ya procesada",
     processed: "Leída",
     rejectedLabel: "No se pudo leer",

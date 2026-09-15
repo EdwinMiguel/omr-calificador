@@ -338,6 +338,8 @@ export interface UploadProgress {
   processed: number;
   total: number | null;
   currentFile: string | null;
+  fileIndex: number;
+  fileCount: number;
   done: boolean;
 }
 
@@ -366,7 +368,14 @@ export async function uploadSheets(
   files: File[],
   onProgress?: (p: UploadProgress) => void
 ): Promise<{ results: UploadResult[]; failures: UploadFailure[] }> {
-  const progress: UploadProgress = { processed: 0, total: null, currentFile: null, done: false };
+  const progress: UploadProgress = {
+    processed: 0,
+    total: null,
+    currentFile: null,
+    fileIndex: 0,
+    fileCount: files.length,
+    done: false,
+  };
   const tick = (patch: Partial<UploadProgress>): void => {
     Object.assign(progress, patch);
     onProgress?.({ ...progress });
@@ -374,8 +383,10 @@ export async function uploadSheets(
 
   const results: UploadResult[] = [];
   const failures: UploadFailure[] = [];
+  let fileIndex = 0;
   for (const file of files) {
-    tick({ currentFile: file.name });
+    fileIndex += 1;
+    tick({ currentFile: file.name, fileIndex });
     try {
       const fileResults = await uploadFileLocal(repo, batchId, file, {}, {
         onPageCount: (count) => tick({ total: (progress.total ?? 0) + count }),
