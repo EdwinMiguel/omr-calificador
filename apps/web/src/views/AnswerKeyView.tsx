@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import type { BatchDetail } from "../engine-browser/localClient.ts";
 import { postAnswerKey, readSheetAsAnswerKey } from "../engine-browser/localClient.ts";
 import { UI } from "../strings.ts";
+import { parseTypedAnswerKey } from "./typedAnswerKey.ts";
 import { Card, CardHead, ViewHead, Callout, Bubble } from "../ui/primitives.tsx";
 
 type Step = "empty" | "verify" | "active";
@@ -65,12 +66,28 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
     }
   }
 
+  /** Ver typedAnswerKey.ts: ahí está la regla y el bug que la endureció. */
   function useTypedKey(text: string) {
-    const letters = text.toUpperCase().replace(/[^A-E]/g, "").split("");
-    const parsed: Record<number, string> = {};
-    letters.forEach((l, i) => { parsed[i + 1] = l; });
+    const { answers: parsed } = parseTypedAnswerKey(text, total);
     setDraft(parsed);
     setUnresolved(Array.from({ length: total }, (_, i) => i + 1).filter((n) => !parsed[n]));
+    setSource("manual");
+    setSourceSheetId(undefined);
+    setStep("verify");
+  }
+
+  /**
+   * Arranca la clave vacía, para marcarla a clic pregunta por pregunta en
+   * VerifyStep en vez de escribir o pegar texto — es el mismo riesgo
+   * posicional de `useTypedKey` que dio el bug de typedAnswerKey.ts, pero
+   * acá no puede pasar: cada botón A-E lleva escrito su propio ordinal `n`,
+   * no hay ninguna cuenta de letras de por medio que una letra de más pueda
+   * correr de lugar. `source` se guarda como "manual" — es entrada manual
+   * igual que teclear, solo que con el mouse en vez del teclado.
+   */
+  function startClickKey() {
+    setDraft({});
+    setUnresolved(Array.from({ length: total }, (_, i) => i + 1));
     setSource("manual");
     setSourceSheetId(undefined);
     setStep("verify");
@@ -104,6 +121,7 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
       ? existing.voided.filter((n) => n !== ordinal)
       : [...existing.voided, ordinal];
     setBusy(true);
+    setError(null);
     try {
       await postAnswerKey(detail.batch.id, {
         answers: existing.answers,
@@ -113,6 +131,36 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
         createdBy: "operador",
       });
       onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Corregir UNA sola respuesta de la clave ya activa, sin anular la
+   * pregunta (que la saca de la nota) ni reemplazar la clave entera (que
+   * obliga a rehacer las 100). Mismo patrón que toggleVoid: se reescribe la
+   * clave completa con esa única letra cambiada, y las notas de todo el
+   * lote se recalculan solas — nadie vuelve a escanear nada.
+   */
+  async function changeAnswer(ordinal: number, option: string) {
+    if (!existing) return;
+    if (existing.answers[String(ordinal)] === option) return; // sin cambios reales
+    setBusy(true);
+    setError(null);
+    try {
+      await postAnswerKey(detail.batch.id, {
+        answers: { ...existing.answers, [String(ordinal)]: option },
+        voided: existing.voided,
+        source: existing.source,
+        sourceSheetId: existing.sourceSheetId,
+        createdBy: "operador",
+      });
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -139,7 +187,14 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
       {error && <Callout tone="warn"><strong>{UI.common.error}.</strong> {error}</Callout>}
 
       {step === "empty" && (
-        <EmptyStep detail={detail} busy={busy} onUseSheet={useSheetAsKey} onTyped={useTypedKey} />
+        <EmptyStep
+          detail={detail}
+          total={total}
+          busy={busy}
+          onUseSheet={useSheetAsKey}
+          onTyped={useTypedKey}
+          onStartClick={startClickKey}
+        />
       )}
 
       {step === "verify" && (
@@ -161,6 +216,7 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
           createdAt={existing.createdAt}
           busy={busy}
           onToggleVoid={(n) => void toggleVoid(n)}
+          onChangeAnswer={(n, opt) => void changeAnswer(n, opt)}
           onReplace={() => { setDraft({}); setUnresolved([]); setStep("empty"); }}
         />
       )}
@@ -169,17 +225,20 @@ export function AnswerKeyView({ detail, onChanged }: { detail: BatchDetail; onCh
 }
 
 function EmptyStep({
-  detail, busy, onUseSheet, onTyped,
+  detail, total, busy, onUseSheet, onTyped, onStartClick,
 }: {
   detail: BatchDetail;
+  total: number;
   busy: boolean;
   onUseSheet: (id: string) => void;
   onTyped: (text: string) => void;
+  onStartClick: () => void;
 }) {
   const [mode, setMode] = useState<null | "sheet" | "manual">(null);
   const [text, setText] = useState("");
   const readable = detail.sheets.filter((s) => s.projected || s.outcome.kind === "processed");
-  const typed = text.toUpperCase().replace(/[^A-E]/g, "").length;
+  const { letters, status } = parseTypedAnswerKey(text, total);
+  const typed = letters.length;
 
   return (
     <div className="stack">
@@ -192,12 +251,24 @@ function EmptyStep({
           <p>{UI.answerKey.methods.sheet.body}</p>
           <div className="method-why">{UI.answerKey.methods.sheet.why}</div>
         </button>
+        <button className="method" onClick={onStartClick} disabled={busy}>
+          <h3>{UI.answerKey.methods.click.title}</h3>
+          <p>{UI.answerKey.methods.click.body}</p>
+          <div className="method-why">{UI.answerKey.methods.click.why}</div>
+        </button>
         <button className="method" onClick={() => setMode("manual")} disabled={busy}>
           <h3>{UI.answerKey.methods.manual.title}</h3>
           <p>{UI.answerKey.methods.manual.body}</p>
           <div className="method-why">{UI.answerKey.methods.manual.why}</div>
         </button>
-        <button className="method" onClick={() => setMode("manual")} disabled={busy}>
+        {/* Todavía no implementado — se deja para después de la interfaz de
+            clic. Antes esta tarjeta prometía "súbela desde un archivo de
+            texto" y en realidad abría el mismo cuadro de pegar texto: un
+            hallazgo real de la auditoría (la tarjeta mentía sobre lo que
+            hacía). Ahora está deshabilitada y dice "Próximamente" en vez de
+            fingir una función que no existe. */}
+        <button className="method method--soon" disabled title={UI.answerKey.methods.import.comingSoon}>
+          <div className="method-badge method-badge--idle">{UI.answerKey.methods.import.comingSoon}</div>
           <h3>{UI.answerKey.methods.import.title}</h3>
           <p>{UI.answerKey.methods.import.body}</p>
           <div className="method-why">{UI.answerKey.methods.import.why}</div>
@@ -243,12 +314,22 @@ function EmptyStep({
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+            {/* Sobran letras: el caso peligroso. No alcanza con deshabilitar
+                el botón — sin decir por qué, el profesor ve "107 de 100" y no
+                tiene forma de saber que el título pegado arriba es lo que le
+                corrió todas las respuestas. */}
+            {status === "tooMany" && (
+              <Callout tone="warn"><strong>{UI.answerKey.manualTooMany(typed, total)}</strong></Callout>
+            )}
+            {status === "incomplete" && (
+              <Callout>{UI.answerKey.manualTooFew(typed, total)}</Callout>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
-              <span className="topbar-meta mono">{UI.answerKey.manualCount(typed, 100)}</span>
+              <span className="topbar-meta mono">{UI.answerKey.manualCount(typed, total)}</span>
               <button
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
-                disabled={typed === 0}
+                disabled={status !== "exact"}
                 onClick={() => onTyped(text)}
               >
                 {UI.answerKey.useThis}
@@ -287,27 +368,35 @@ function VerifyStep({
           </div>
 
           <div className="eyebrow" style={{ margin: "20px 0 10px" }}>Las {total} respuestas</div>
+          {/*
+           * Los botones A-E se muestran SIEMPRE, no solo en las preguntas
+           * sin marcar — es lo que convierte esta grilla en la interfaz de
+           * "marcar la clave a clic" (el ordinal `n` va escrito en cada
+           * botón, así que no hay ninguna cuenta de letras de por medio que
+           * un clic de más pueda correr de lugar, a diferencia del bug de
+           * typedAnswerKey.ts). También sirve para corregir sobre la marcha
+           * una hoja patrón mal leída o una letra que se tecleó mal, sin
+           * tener que volver a escanear ni a pegar el texto entero.
+           */}
           <div className="keygrid" style={keygridStyle(total)}>
             {numbers.map((n) => {
               const ans = draft[n];
               return (
                 <div className={`keycell${ans ? "" : " is-unsure"}`} key={n}>
                   <span className="keycell-n">{n}</span>
-                  {ans ? (
-                    <>
-                      <Bubble variant="fill" />
-                      <span className="keycell-ans">{ans}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Bubble variant="part" />
-                      <span className="keycell-pick">
-                        {OPTIONS.map((o) => (
-                          <button key={o} onClick={() => onPick(n, o)}>{o}</button>
-                        ))}
-                      </span>
-                    </>
-                  )}
+                  <Bubble variant={ans ? "fill" : "part"} />
+                  <span className="keycell-pick">
+                    {OPTIONS.map((o) => (
+                      <button
+                        key={o}
+                        className={o === ans ? "is-selected" : ""}
+                        aria-pressed={o === ans}
+                        onClick={() => onPick(n, o)}
+                      >
+                        {o}
+                      </button>
+                    ))}
+                  </span>
                 </div>
               );
             })}
@@ -332,17 +421,25 @@ function VerifyStep({
 }
 
 function ActiveStep({
-  answers, voided, createdAt, busy, onToggleVoid, onReplace,
+  answers, voided, createdAt, busy, onToggleVoid, onChangeAnswer, onReplace,
 }: {
   answers: Record<string, string>;
   voided: number[];
   createdAt: string;
   busy: boolean;
   onToggleVoid: (n: number) => void;
+  onChangeAnswer: (n: number, opt: string) => void;
   onReplace: () => void;
 }) {
   const numbers = Object.keys(answers).map(Number).sort((a, b) => a - b);
   const voidedSet = new Set(voided);
+  // Qué pregunta tiene abierto su selector A-E ahora mismo — de a una por
+  // vez, no una grilla entera de botones editables como en VerifyStep.
+  // Ahí el punto ES recorrer las 100; acá la clave ya está activa y
+  // calificando: mostrar 5 botones sueltos en cada una de las 100 filas
+  // invitaría al clic accidental que cambia una respuesta correcta sin
+  // querer. "Editar" es un gesto deliberado, pregunta por pregunta.
+  const [editing, setEditing] = useState<number | null>(null);
 
   return (
     <div className="stack">
@@ -365,14 +462,43 @@ function ActiveStep({
           <div className="keygrid" style={keygridStyle(numbers.length)}>
             {numbers.map((n) => {
               const isVoid = voidedSet.has(n);
+              const ans = answers[String(n)];
+              const isEditing = editing === n;
               return (
                 <div className={`keycell${isVoid ? " is-void" : ""}`} key={n}>
                   <span className="keycell-n">{n}</span>
                   <Bubble variant="fill" />
-                  <span className="keycell-ans">{answers[String(n)]}</span>
-                  <button className="keycell-void" disabled={busy} onClick={() => onToggleVoid(n)}>
-                    {isVoid ? UI.answerKey.restoreQuestion : UI.answerKey.voidQuestion}
-                  </button>
+                  {isEditing ? (
+                    <span className="keycell-pick">
+                      {OPTIONS.map((o) => (
+                        <button
+                          key={o}
+                          className={o === ans ? "is-selected" : ""}
+                          aria-pressed={o === ans}
+                          disabled={busy}
+                          // Elegir CUALQUIER letra cierra la edición — también
+                          // la que ya estaba marcada: tocarla de nuevo es la
+                          // forma de cerrar sin querer cambiar nada, sin
+                          // necesitar un botón "cancelar" aparte.
+                          onClick={() => { onChangeAnswer(n, o); setEditing(null); }}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="keycell-ans">{ans}</span>
+                  )}
+                  <div className="keycell-actions">
+                    {!isEditing && (
+                      <button className="keycell-void keycell-edit" disabled={busy} onClick={() => setEditing(n)}>
+                        {UI.answerKey.editQuestion}
+                      </button>
+                    )}
+                    <button className="keycell-void" disabled={busy} onClick={() => onToggleVoid(n)}>
+                      {isVoid ? UI.answerKey.restoreQuestion : UI.answerKey.voidQuestion}
+                    </button>
+                  </div>
                 </div>
               );
             })}

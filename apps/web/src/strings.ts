@@ -188,10 +188,10 @@ export const UI = {
   answerKey: {
     title: "Clave de respuestas",
     lead: "Sin clave, el sistema lee las respuestas de cada alumno pero no puede decir si son correctas.",
-    steps: ["1 · Sin clave", "2 · Verificar hoja patrón", "3 · Clave activa"],
+    steps: ["1 · Sin clave", "2 · Completar clave", "3 · Clave activa"],
     emptyLead: (n: number) =>
       `${n} ${n === 1 ? "hoja leída" : "hojas leídas"}, ninguna calificada todavía. El sistema guardó las respuestas tal cual las marcó cada alumno. En cuanto exista una clave, todas las notas aparecen al instante.`,
-    methodsTitle: "Tres maneras de crearla",
+    methodsTitle: "Elige cómo crearla",
     methods: {
       sheet: {
         title: "Escanear una hoja patrón",
@@ -199,15 +199,21 @@ export const UI = {
         why: "Es lo más rápido y lo que ya sabes hacer: no hay que teclear nada, y la hoja queda como respaldo en papel de cuál fue la clave.",
         badge: "Recomendada",
       },
+      click: {
+        title: "Marcar las respuestas en pantalla",
+        body: "Recorre las 100 preguntas en pantalla y toca la opción correcta de cada una — como llenar la hoja, pero con el mouse en vez de un lápiz.",
+        why: "No hace falta imprimir nada ni escribir 100 letras seguidas: útil si no tienes una hoja en blanco a mano.",
+      },
       manual: {
         title: "Escribirla a mano",
         body: "Teclea las 100 respuestas seguidas y el sistema las reparte por pregunta a medida que escribes.",
-        why: "Útil cuando no tienes una hoja impresa a mano, o para corregir una pregunta suelta después.",
+        why: "Más rápido que tocar una por una si ya la tienes memorizada o escrita en un papel al lado del teclado.",
       },
       import: {
-        title: "Importar un archivo",
-        body: "Pega la clave separada por espacios o comas, o súbela desde un archivo de texto.",
-        why: "Sirve si ya tenías la clave escrita en la computadora antes de usar este sistema.",
+        title: "Importar desde Excel",
+        body: "Sube el archivo de Excel donde ya tienes la clave (una hoja de Google descargada como Excel también sirve).",
+        why: "Para cuando ya llevas el control en una hoja de cálculo, sin tener que volver a escribirla acá.",
+        comingSoon: "Próximamente",
       },
     },
     verifyWarning:
@@ -218,6 +224,7 @@ export const UI = {
     verifyReady: "Todas las respuestas están confirmadas. La clave puede activarse.",
     activate: (n: number) => `Activar clave y calificar ${n} ${n === 1 ? "hoja" : "hojas"}`,
     activeSince: (d: string) => `Clave activa desde el ${d}.`,
+    editQuestion: "editar",
     voidQuestion: "anular",
     restoreQuestion: "restaurar",
     voidedCount: (n: number) => (n === 0 ? "0 anuladas" : `${n} ${n === 1 ? "anulada" : "anuladas"}`),
@@ -227,6 +234,13 @@ export const UI = {
     pickSheet: "Elige la hoja patrón entre las ya cargadas",
     manualPlaceholder: "DBCDCDBBCE…",
     manualCount: (n: number, total: number) => `${n} de ${total} respuestas escritas`,
+    manualTooMany: (n: number, total: number) =>
+      `Se encontraron ${n} letras A-E y la clave necesita exactamente ${total}. ` +
+      `Suele pasar al pegar el título del examen o el nombre del docente junto con las respuestas: ` +
+      `esas letras se cuentan como respuestas y corren todas las demás de lugar. ` +
+      `Deja en el recuadro solo las ${total} respuestas.`,
+    manualTooFew: (n: number, total: number) =>
+      `Faltan ${total - n}: se encontraron ${n} letras A-E de las ${total} que necesita la clave.`,
     useThis: "Usar esta clave",
   },
 

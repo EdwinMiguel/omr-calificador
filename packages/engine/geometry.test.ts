@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { analyzeGeometry, renderOverlay } from "./geometry.ts";
 import { loadPages } from "../../apps/cli/io/loadPages.ts";
 import { buildOfficialTemplate } from "../pdf-generator/officialTemplate.ts";
@@ -7,12 +7,18 @@ import { buildTemplate as buildTemplateB } from "../../template.ts";
 
 const DPI = 200;
 
+// dataset/ está en .gitignore: en un clon limpio la foto no existe. Mismo
+// criterio que analyzeSheet.test.ts — el test se salta en vez de fallar por
+// una razón que no es del código. Sin esto, `npx vitest run` de un clon
+// nuevo arranca en rojo, y una suite que siempre tiene rojos deja de avisar
+// cuando el rojo es de verdad.
+const FOTO_A = "dataset/fotos/WhatsApp Image 2026-08-26 at 8.24.20 PM (1).jpeg";
+const HAY_FOTO_A = existsSync(FOTO_A);
+
 describe("analyzeGeometry — Template A (hoja oficial, sobre foto real)", () => {
-  it("alinea una foto real y devuelve reprojectionErrorPx bajo", async () => {
+  it.skipIf(!HAY_FOTO_A)("alinea una foto real y devuelve reprojectionErrorPx bajo", async () => {
     const templateA = buildOfficialTemplate(100);
-    const pages = await loadPages(
-      "dataset/fotos/WhatsApp Image 2026-08-26 at 8.24.20 PM (1).jpeg"
-    );
+    const pages = await loadPages(FOTO_A);
     const outcome = await analyzeGeometry(pages[0]!, templateA, DPI);
 
     expect(outcome.kind).toBe("aligned");
@@ -61,11 +67,9 @@ describe("analyzeGeometry — Template B sintético (Nivel 1, PROMPT.md §4)", (
 });
 
 describe("renderOverlay — Template A", () => {
-  it("los círculos de burbuja caen sobre la burbuja impresa real (no en blanco)", async () => {
+  it.skipIf(!HAY_FOTO_A)("los círculos de burbuja caen sobre la burbuja impresa real (no en blanco)", async () => {
     const templateA = buildOfficialTemplate(100);
-    const pages = await loadPages(
-      "dataset/fotos/WhatsApp Image 2026-08-26 at 8.24.20 PM (1).jpeg"
-    );
+    const pages = await loadPages(FOTO_A);
     const outcome = await analyzeGeometry(pages[0]!, templateA, DPI);
     expect(outcome.kind).toBe("aligned");
     if (outcome.kind !== "aligned") return;

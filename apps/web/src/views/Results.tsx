@@ -162,9 +162,17 @@ function Row({
       <td className="num mono">{p.grade && pending === 0 ? p.grade.value : "—"}</td>
       <td className="mono topbar-meta">{sheet.fileName}</td>
       <td>
-        {pending > 0
-          ? <button className="btn btn--sm" onClick={onReview}>{UI.common.review}</button>
-          : <button className="btn btn--sm btn--ghost" onClick={onOpen}>{UI.common.view}</button>}
+        {/* "Ver hoja" ahora SIEMPRE está disponible, tenga o no dudas
+            pendientes — antes, con 1 sola pregunta sin resolver, no había
+            forma de ver la foto completa, solo el recorte de esa pregunta
+            en Revisión. "Revisar" se suma al lado cuando hace falta, no la
+            reemplaza. */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {pending > 0 && (
+            <button className="btn btn--sm" onClick={onReview}>{UI.common.review}</button>
+          )}
+          <button className="btn btn--sm btn--ghost" onClick={onOpen}>{UI.common.view}</button>
+        </div>
       </td>
     </tr>
   );

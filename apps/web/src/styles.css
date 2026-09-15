@@ -447,6 +447,15 @@ td.num, th.num { text-align: right; }
 .keycell-ans { font-family: var(--mono); font-size: var(--t-bd); font-weight: 600; }
 .keycell-void { margin-left: auto; font-size: 10px; border: 0; background: none; color: var(--ink-muted); cursor: pointer; font-family: var(--sans); padding: 2px 4px; border-radius: 3px; }
 .keycell-void:hover { color: var(--bad); background: var(--bad-soft); }
+/* "editar" no es destructivo como "anular" — el rojo de .keycell-void:hover
+   sería una señal falsa de peligro para una acción que no anula nada. */
+.keycell-void.keycell-edit:hover { color: var(--accent-br); background: var(--surface-2); }
+/* En ActiveStep, "editar" y "anular/restaurar" conviven en la misma fila —
+   .keycell-void ya trae su propio margin-left:auto pensado para cuando es
+   el único botón; acá lo neutraliza el contenedor para no duplicar el
+   empuje hacia la derecha. */
+.keycell-actions { margin-left: auto; display: flex; gap: 4px; }
+.keycell-actions .keycell-void { margin-left: 0; }
 
 /* Flujo de la clave: los tres estados por los que pasa */
 .keystate { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -480,6 +489,11 @@ td.num, th.num { text-align: right; }
 }
 :root[data-theme="dark"] .method-badge { color: #0D1015; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .method-badge { color: #0D1015; } }
+/* Variante para "Próximamente" (importar Excel, todavía sin implementar) —
+   mismo lugar y forma que method-badge, pero sin el color de acento: ese
+   color significa "recomendado", y esta tarjeta es lo opuesto, todavía no
+   se puede usar. */
+.method-badge--idle { background: var(--ink-muted); color: var(--surface); }
 .method h3 { font-size: var(--t-md); }
 .method > p { font-size: var(--t-sm); color: var(--ink-2); line-height: 1.55; }
 .method-why { font-size: var(--t-sm); color: var(--ink-muted); border-top: 1px solid var(--rule); padding-top: 10px; margin-top: auto; line-height: 1.5; }
@@ -501,6 +515,12 @@ td.num, th.num { text-align: right; }
 .keycell-pick button:hover { background: var(--accent); border-color: var(--accent); color: #FFF; }
 :root[data-theme="dark"] .keycell-pick button:hover { color: #0D1015; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .keycell-pick button:hover { color: #0D1015; } }
+/* La opción ya elegida para esa pregunta — necesita distinguirse del resto
+   incluso sin el mouse encima, o construir la clave a clics (VerifyStep con
+   el borrador vacío) no deja ver qué quedó marcado en cada una de las 100. */
+.keycell-pick button.is-selected { background: var(--accent); border-color: var(--accent); color: #FFF; }
+:root[data-theme="dark"] .keycell-pick button.is-selected { color: #0D1015; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .keycell-pick button.is-selected { color: #0D1015; } }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--accent); border-color: var(--accent); }
 
@@ -560,6 +580,25 @@ td.num, th.num { text-align: right; }
   .queue { position: static; }
   .view { padding: 20px 16px 48px; }
   .topbar { padding: 12px 16px; }
+  /* El min-width de 200px que arregla el selector cortado en desktop
+     (ver select.btn más abajo) desborda la página en celular — MEDIDO:
+     166px de overflow horizontal a 420px de ancho. Acá se deja encoger
+     libre otra vez; en una ventana angosta el texto recortado del
+     selector es un compromiso aceptable (se puede tocar igual para ver
+     las opciones completas), un scroll horizontal en toda la página no.
+     `.topbar-right select.btn`, no `select.btn` a secas: misma
+     especificidad que la regla de abajo (elemento + clase) perdía contra
+     ella pase lo que pase con el media query, porque en CSS con
+     especificidad igual gana la que aparece DESPUÉS en el archivo — y
+     esta regla queda antes. Con una clase extra de por medio, gana
+     siempre, sin depender del orden. MEDIDO, no solo razonado: sin este
+     cambio el navegador seguía devolviendo min-width:200px acá adentro
+     aunque el media query estuviera activo.
+     También: .topbar-right no envolvía sus botones — con los 2 nuevos de
+     hoy (Renombrar, Borrar lote) ya pasaba de 570px de contenido en un
+     viewport de 420px, aun sin el selector de por medio. */
+  .topbar-right select.btn { min-width: 0; }
+  .topbar-right { flex-wrap: wrap; row-gap: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -598,8 +637,18 @@ td.num, th.num { text-align: right; }
 .field-input:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 1px; }
 .generate-preview { margin-top: 16px; padding: 10px 12px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: var(--t-sm); }
 
-select.btn { appearance: none; padding-right: 26px; background-image: none; max-width: 220px; }
+/* max-width era 220px, fijado antes de que el label del lote incluyera el
+   conteo de hojas — MEDIDO: "3.º B · Comunicación · 14 set (1 hoja)" ya
+   necesita ~211px solo de texto, más el padding-right del 26px de acá
+   abajo para la flechita. Es el único <select> de toda la app (verificado
+   con grep), así que no hay otro caso al que este ancho le sirva más
+   chico. */
+select.btn { appearance: none; padding-right: 26px; background-image: none; min-width: 200px; max-width: 320px; }
 .method:disabled { opacity: .5; cursor: wait; }
+/* "wait" es para cuando `busy` está cargando algo — la tarjeta de importar
+   Excel está deshabilitada por otra razón (no existe todavía), no porque
+   algo esté en curso. */
+.method--soon:disabled { cursor: not-allowed; }
 .keystate-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ─── Contacto de soporte, pie del riel ──────────────────── */

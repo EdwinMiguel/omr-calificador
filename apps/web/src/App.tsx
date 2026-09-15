@@ -23,14 +23,29 @@ import { Chip, Empty, Callout } from "./ui/primitives.tsx";
 
 type View = "generar" | "cargar" | "resultados" | "revision" | "rechazadas" | "clave" | "detalle" | "metricas";
 
+/** "14 set", sin el punto de "14 set." que da toLocaleDateString por
+ * defecto en es-PE — es una sugerencia de nombre de lote, no una fecha
+ * formal que necesite la abreviatura completa. */
+function suggestedDateLabel(): string {
+  return new Date().toLocaleDateString("es-PE", { day: "numeric", month: "short" }).replace(".", "");
+}
+
 export function App() {
   const batches = useBatches();
   const [batchId, setBatchId] = useState<string | null>(null);
   const [view, setView] = useState<View>("resultados");
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "doubts" | "rejected">("all");
-  const [restoreError, setRestoreError] = useState<string | null>(null);
+  // Un solo canal de error para las acciones del armazón (crear, renombrar,
+  // borrar y restaurar un lote). Las tres primeras no lo tenían: escribían
+  // en IndexedDB sin try/catch, así que una cuota llena o una ventana de
+  // incógnito rechazaba la escritura, la promesa quedaba sin capturar y la
+  // pantalla no cambiaba nada — el profesor apretaba "Nuevo lote" y no
+  // pasaba absolutamente nada, sin pista de por qué.
+  const [actionError, setActionError] = useState<string | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  const describeError = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
   // Al cargar, entra al lote más reciente en vez de dejar la pantalla vacía.
   useEffect(() => {
@@ -44,25 +59,49 @@ export function App() {
   const rejectedCount = d?.sheets.filter((s) => s.outcome.kind === "rejected" && !s.projected).length ?? 0;
 
   async function newBatch() {
-    const label = window.prompt(UI.common.batchName, "3.º B · Comunicación");
+    // Con fecha, no un texto fijo: el prompt sugería SIEMPRE el mismo
+    // "3.º B · Comunicación" — crear dos lotes en el mismo día (algo que
+    // pasa fácil, apretando "Nuevo lote" sin querer) los dejaba con el
+    // mismo nombre, indistinguibles en el selector de arriba.
+    const suggestion = `3.º B · Comunicación · ${suggestedDateLabel()}`;
+    const label = window.prompt(UI.common.batchName, suggestion);
     if (!label) return;
-    const b = await createBatch(label);
-    batches.reload();
-    setBatchId(b.id);
-    setView("cargar");
+    setActionError(null);
+    try {
+      const b = await createBatch(label);
+      batches.reload();
+      setBatchId(b.id);
+      setView("cargar");
+    } catch (e) {
+      setActionError(describeError(e));
+    }
   }
 
   function refresh() {
     detail.reload();
+    // BUG REAL, encontrado probando el conteo de hojas del selector recién
+    // agregado: sin esto, subir una hoja actualizaba "Resultados" pero el
+    // conteo "(N hojas)" del selector de arriba quedaba pegado en el
+    // número de cuando se creó el lote — mostrando "0 hojas" en un lote
+    // que en realidad ya tenía 30. Peor que no mostrar el conteo: uno que
+    // miente. batches.reload() es una lectura liviana (IndexedDB local),
+    // no hay costo real en pedirla de más en los otros llamadores de
+    // refresh() (Review/Rechazadas/Clave) que no cambian la cantidad.
+    batches.reload();
   }
 
   async function doRenameBatch() {
     if (!batchId || !d) return;
     const label = window.prompt(UI.common.renameBatchPrompt, d.batch.label);
     if (!label || label === d.batch.label) return;
-    await renameBatch(batchId, label);
-    batches.reload();
-    detail.reload();
+    setActionError(null);
+    try {
+      await renameBatch(batchId, label);
+      batches.reload();
+      detail.reload();
+    } catch (e) {
+      setActionError(describeError(e));
+    }
   }
 
   async function doDeleteBatch() {
@@ -72,7 +111,9 @@ export function App() {
     // explícita con el conteo real, no un "¿estás seguro?" genérico.
     const ok = window.confirm(UI.common.confirmDeleteBatch(d.batch.label, d.sheets.length));
     if (!ok) return;
-    await deleteBatch(batchId);
+    setActionError(null);
+    try {
+      await deleteBatch(batchId);
     // BUG REAL, encontrado probando el flujo completo: poner `setBatchId(null)`
     // acá y confiar en el efecto de auto-selección de abajo no alcanza — ese
     // efecto lee `batches.data`, que en este instante TODAVÍA es la lista
@@ -84,22 +125,25 @@ export function App() {
     // reselección: la pantalla queda rota hasta que el profesor elija otro
     // lote a mano. Se lee la lista fresca directo del repositorio, sin pasar
     // por el estado cacheado, para no depender de esa carrera.
-    const remaining = await repo.listBatches();
-    setBatchId(remaining.length > 0 ? remaining[0]!.id : null);
-    setSheetId(null);
-    batches.reload();
+      const remaining = await repo.listBatches();
+      setBatchId(remaining.length > 0 ? remaining[0]!.id : null);
+      setSheetId(null);
+      batches.reload();
+    } catch (e) {
+      setActionError(describeError(e));
+    }
   }
 
   async function restoreBackup(file: File | null) {
     if (!file) return;
-    setRestoreError(null);
+    setActionError(null);
     try {
       const b = await importBatchBackup(file, repo);
       batches.reload();
       setBatchId(b.id);
       setView("resultados");
     } catch (e) {
-      setRestoreError(e instanceof Error ? e.message : String(e));
+      setActionError(describeError(e));
     }
   }
 
@@ -191,7 +235,11 @@ export function App() {
               onChange={(e) => { setBatchId(e.target.value); setSheetId(null); }}
             >
               {(batches.data ?? []).map((b) => (
-                <option key={b.id} value={b.id}>{b.label}</option>
+                // Con la cantidad de hojas: dos lotes con el mismo nombre
+                // (el prompt de "Nuevo lote" sugería siempre el mismo texto,
+                // ver newBatch()) eran indistinguibles acá — así, aunque se
+                // llamen igual, se nota cuál tiene contenido.
+                <option key={b.id} value={b.id}>{b.label} ({UI.common.sheets(b.sheetCount)})</option>
               ))}
             </select>
             {batchId && d && (
@@ -219,7 +267,7 @@ export function App() {
         </header>
 
         <section className="view">
-          {restoreError && <Callout tone="warn"><strong>{UI.common.error}.</strong> {restoreError}</Callout>}
+          {actionError && <Callout tone="warn"><strong>{UI.common.error}.</strong> {actionError}</Callout>}
           {!batchId && !batches.loading && <Empty>{UI.common.noBatch}</Empty>}
           {detail.loading && <Empty>{UI.common.loading}</Empty>}
           {detail.error && <Empty>{detail.error}</Empty>}

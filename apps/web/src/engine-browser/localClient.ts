@@ -212,8 +212,25 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): Async<T> {
   return { data, loading, error, reload: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
-export function useBatches(): Async<Batch[]> {
-  return useAsync(() => repo.listBatches(), []);
+/**
+ * Cuántas hojas tiene cada lote — se agrega acá, no en `Batch` (la forma
+ * cruda que se guarda), porque no es un dato que se guarde: se deriva de
+ * `sheets` cada vez, igual que el resto de las proyecciones de este
+ * archivo. Existe para que el selector de lotes en App.tsx pueda mostrar
+ * "3.º B · Comunicación (0 hojas)" — sin esto, dos lotes con el mismo
+ * nombre (el prompt de "Nuevo lote" siempre sugiere el mismo texto) son
+ * indistinguibles en el desplegable, y elegir el vacío por error es fácil.
+ */
+export interface BatchWithCount extends Batch {
+  sheetCount: number;
+}
+
+export function useBatches(): Async<BatchWithCount[]> {
+  return useAsync(async () => {
+    const list = await repo.listBatches();
+    const counts = await Promise.all(list.map((b) => repo.listSheets(b.id)));
+    return list.map((b, i) => ({ ...b, sheetCount: counts[i]!.length }));
+  }, []);
 }
 
 export function useBatch(id: string | null): Async<BatchDetail> {

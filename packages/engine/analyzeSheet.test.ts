@@ -30,13 +30,20 @@ describe("analyzeSheet — rechazos tempranos", () => {
 });
 
 describe("analyzeSheet — alignedImage (necesaria para 'Ver hoja' en el navegador)", () => {
-  it(
+  // Mismo criterio que los tests de verdad conocida de más abajo: dataset/
+  // está en .gitignore, así que en un clon limpio la foto no existe y el
+  // test se salta en vez de fallar por una razón que no es del código. Sin
+  // esta guarda el `npx vitest run` de un clon nuevo arranca en rojo, y una
+  // suite que siempre tiene rojos deja de avisar cuando el rojo es de verdad.
+  const FOTO = "dataset/fotos-marcadas/hoja-resuelta-escaneada.jpg";
+
+  it.skipIf(!existsSync(FOTO))(
     "una hoja procesada trae la imagen ya enderezada, útil para mostrarla — " +
     "sin esto, la versión del navegador no tiene dónde guardarla (no hay disco " +
     "de servidor que la recalcule bajo demanda) y 'Ver hoja' queda inalcanzable",
     async () => {
       const t = buildOfficialTemplate(100);
-      const img = (await loadPages("dataset/fotos-marcadas/hoja-resuelta-escaneada.jpg"))[0]!;
+      const img = (await loadPages(FOTO))[0]!;
       const outcome = await analyzeSheet(img, t, 200, {});
 
       // Esta hoja se rechaza por STUDENT_ID_UNREADABLE (código con doble
@@ -87,6 +94,20 @@ describe("analyzeSheet — alignedImage (necesaria para 'Ver hoja' en el navegad
  * incorrecta, no como "a revisión": BLANK se auto-acepta y baja la nota
  * igual que una letra equivocada.
  */
+
+/**
+ * PROBLEMA REAL, encontrado auditando: estos tests decodifican un PDF o una
+ * foto a 200 dpi y corren el motor entero. Solos tardan ~1.2 s, pero con la
+ * suite completa en paralelo el de "Maria Ana Chavez.pdf" medía 5046 ms y
+ * chocaba contra el timeout por defecto de vitest (5000 ms). El resultado
+ * era que LA barrera de PROMPT.md §15 — el único test que demuestra que
+ * ninguna respuesta auto-aceptada contradice la verdad — salía en rojo por
+ * carga de CPU, no por el código. Un test crítico que falla por razones
+ * ajenas deja de leerse, que es peor que no tenerlo. El límite generoso es
+ * a propósito: acá no se está midiendo velocidad.
+ */
+const FIXTURE_TIMEOUT_MS = 30_000;
+
 describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida", () => {
   const hojas = [
     ["dataset/fotos-marcadas/hoja-resuelta-escaneada.jpg", "ground-truth/hoja-resuelta-escaneada.json"],
@@ -126,7 +147,7 @@ describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida", () =
         }
       }
       expect(incorrectas).toEqual([]);
-    });
+    }, FIXTURE_TIMEOUT_MS);
   }
 });
 
@@ -179,6 +200,6 @@ describe("analyzeSheet — AUTO_ACCEPTED_INCORRECT contra verdad conocida (hoja-
         }
       }
       expect(incorrectas).toEqual([]);
-    });
+    }, FIXTURE_TIMEOUT_MS);
   }
 });
